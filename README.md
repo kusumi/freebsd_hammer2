@@ -7,7 +7,7 @@ FreeBSD [HAMMER2](https://gitweb.dragonflybsd.org/dragonfly.git/blob/HEAD:/sys/v
 
 + Out-of-tree repository for https://github.com/freebsd/freebsd-src/pull/627
 
-## Requirement
+## Requirements
 
 + Recent FreeBSD (only tested with 14.0-CURRENT)
 
@@ -15,9 +15,9 @@ FreeBSD [HAMMER2](https://gitweb.dragonflybsd.org/dragonfly.git/blob/HEAD:/sys/v
 
 ## Build
 
-        # cd freebsd_hammer2
-        # make
-        # tree dist/
+        $ cd freebsd_hammer2
+        $ make
+        $ tree dist/
         dist/
         |-- bin
         |   |-- fsck_hammer2 -> ../../src/sbin/fsck_hammer2/fsck_hammer2

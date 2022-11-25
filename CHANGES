@@ -1,3 +1,9 @@
+v1.0.1
+======
+- Fix build error for __FreeBSD_version < 1400043.
+ https://bugs.freebsd.org/bugzilla/show_bug.cgi?id=267982#c3
+ https://docs.freebsd.org/en/books/porters-handbook/versions
+
 v1.0.0
 ======
 - Initial release

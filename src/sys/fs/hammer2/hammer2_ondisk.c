@@ -66,7 +66,12 @@ hammer2_lookup_device(const struct mount *mp, const char *path,
 	KKASSERT(path);
 	KKASSERT(*path != '\0');
 
+	/* See FreeBSD src 7e1d3eefd410ca0fbae5a217422821244c3eeee4 */
+#if __FreeBSD_version >= 1400043
 	NDINIT(ndp, LOOKUP, FOLLOW | LOCKLEAF, UIO_SYSSPACE, path);
+#else
+	NDINIT(ndp, LOOKUP, FOLLOW | LOCKLEAF, UIO_SYSSPACE, path, td);
+#endif
 	if ((error = namei(ndp)) != 0)
 		return (error);
 	NDFREE_PNBUF(ndp);
