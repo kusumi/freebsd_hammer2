@@ -9,7 +9,13 @@ FreeBSD [HAMMER2](https://gitweb.dragonflybsd.org/dragonfly.git/blob/HEAD:/sys/v
 
 ## Requirements
 
-+ Recent FreeBSD (only tested with 14.0-CURRENT)
++ Recent FreeBSD
+
+    + Compiles and tested with 14.0-CURRENT
+
+    + Known to compile with 13.X-XXX, but untested
+
+    + Does not compile with 12.X-XXX or below
 
 + FreeBSD src tree under /usr/src by default
 
@@ -17,23 +23,25 @@ FreeBSD [HAMMER2](https://gitweb.dragonflybsd.org/dragonfly.git/blob/HEAD:/sys/v
 
         $ cd freebsd_hammer2
         $ make
-        $ tree dist/
-        dist/
-        |-- bin
-        |   |-- fsck_hammer2 -> ../../src/sbin/fsck_hammer2/fsck_hammer2
-        |   |-- hammer2 -> ../../src/sbin/hammer2/hammer2
-        |   |-- mount_hammer2 -> ../../src/sbin/mount_hammer2/mount_hammer2
-        |   `-- newfs_hammer2 -> ../../src/sbin/newfs_hammer2/newfs_hammer2
-        |-- kld
-        |   `-- hammer2.ko -> ../../src/sys/fs/hammer2/hammer2.ko
-        `-- man
-            |-- fsck_hammer2.8 -> ../../src/sbin/fsck_hammer2/fsck_hammer2.8
-            |-- hammer2.8 -> ../../src/sbin/hammer2/hammer2.8
-            |-- mount_hammer2.8 -> ../../src/sbin/mount_hammer2/mount_hammer2.8
-            `-- newfs_hammer2.8 -> ../../src/sbin/newfs_hammer2/newfs_hammer2.8
+
+## Install
+
+        $ sudo bash -x ./script/install.sh
+
+## Uninstall
+
+        $ sudo bash -x ./script/uninstall.sh
+
+## Ports
+
++ WIP at https://bugs.freebsd.org/bugzilla/show_bug.cgi?id=267982
+
++ However I recommend directly using this repository as ports/pkg tend to be not uptodate with upstream.
 
 ## Notes
 
 + Write support is not planned for FreeBSD.
 
 + Tags are merely for packaging, nothing directly to do with file system version.
+
++ -CURRENT aka upstream FreeBSD is the only tier 1 support branch at the moment.
