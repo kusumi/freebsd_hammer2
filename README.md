@@ -34,9 +34,9 @@ FreeBSD [HAMMER2](https://gitweb.dragonflybsd.org/dragonfly.git/blob/HEAD:/sys/v
 
 ## Ports
 
-+ WIP at https://bugs.freebsd.org/bugzilla/show_bug.cgi?id=267982
++ https://www.freshports.org/sysutils/hammer2
 
-+ However I recommend directly using this repository as ports/pkg tend to be not uptodate with upstream.
++ Also see https://bugs.freebsd.org/bugzilla/show_bug.cgi?id=267982
 
 ## Notes
 

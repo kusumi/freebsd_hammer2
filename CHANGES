@@ -1,3 +1,7 @@
+v1.0.3
+======
+- README.md: Mention FreeBSD ports sysutils/hammer2
+
 v1.0.2
 ======
 - Remove dist/ directory
