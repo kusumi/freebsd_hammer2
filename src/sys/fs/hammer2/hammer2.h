@@ -78,6 +78,9 @@
 #include "hammer2_disk.h"
 #include "hammer2_rb.h"
 
+/* See FreeBSD src b214fcceacad6b842545150664bd2695c1c2b34f */
+#define FREEBSD_READDIR_COOKIES_64 1400045
+
 /* KASSERT variant from DragonFly */
 #ifdef INVARIANTS
 #define KKASSERT(exp)	do { if (__predict_false(!(exp)))	  \

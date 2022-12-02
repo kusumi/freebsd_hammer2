@@ -1164,6 +1164,9 @@ hammer2_fhtovp(struct mount *mp, struct fid *fhp, int flags, struct vnode **vpp)
 	hammer2_tid_t inum;
 	int error;
 
+#if __FreeBSD_version < FREEBSD_READDIR_COOKIES_64
+	return (EOPNOTSUPP);
+#endif
 	inum = ((hammer2_tid_t *)fhp->fid_data)[0] & HAMMER2_DIRHASH_USERMSK;
 	if (vpp) {
 		if (inum == 1)

@@ -350,7 +350,11 @@ done:
 	} else {
 		if (cookies) {
 			*ap->a_ncookies = cookie_index;
+#if __FreeBSD_version >= FREEBSD_READDIR_COOKIES_64
 			*ap->a_cookies = cookies;
+#else
+			KKASSERT(0);
+#endif
 		}
 	}
 
@@ -640,6 +644,9 @@ hammer2_vptofh(struct vop_vptofh_args *ap)
 	hammer2_inode_t *ip = VTOI(ap->a_vp);
 	struct fid *fhp;
 
+#if __FreeBSD_version < FREEBSD_READDIR_COOKIES_64
+	return (EOPNOTSUPP);
+#endif
 	KKASSERT(MAXFIDSZ >= 16);
 
 	fhp = (struct fid *)ap->a_fhp;
