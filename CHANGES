@@ -1,3 +1,7 @@
+v1.0.5
+======
+- README.md: Mention https://github.com/kusumi/makefs
+
 v1.0.4
 ======
 - Fix build error on FreeBSD 13.X / i386
