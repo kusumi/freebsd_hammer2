@@ -26,11 +26,13 @@ FreeBSD [HAMMER2](https://gitweb.dragonflybsd.org/dragonfly.git/blob/HEAD:/sys/v
 
 ## Install
 
-        $ sudo bash -x ./script/install.sh
+        $ cd freebsd_hammer2
+        $ make install
 
 ## Uninstall
 
-        $ sudo bash -x ./script/uninstall.sh
+        $ cd freebsd_hammer2
+        $ make uninstall
 
 ## Ports
 

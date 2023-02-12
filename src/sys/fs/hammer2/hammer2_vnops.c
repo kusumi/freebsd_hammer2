@@ -403,7 +403,7 @@ hammer2_read_file(hammer2_inode_t *ip, struct uio *uio, int ioflag)
 			n = uio->uio_resid;
 		if (n > isize - uio->uio_offset)
 			n = (int)(isize - uio->uio_offset);
-		error = uiomove((char *)bp->b_data + loff, n, uio);
+		error = uiomove(bp->b_data + loff, n, uio);
 		if (error) {
 			brelse(bp);
 			bp = NULL;

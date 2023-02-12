@@ -1,2 +1,4 @@
 .depend
 *.o
+
+/src/freebsd_hammer2.diff

@@ -129,9 +129,8 @@ hammer2_to_unix_xid(const struct uuid *uuid)
  * Also, the iscsi crc code is used instead of the old crc32 code.
  */
 hammer2_key_t
-hammer2_dirhash(const unsigned char *name, size_t len)
+hammer2_dirhash(const char *aname, size_t len)
 {
-	const unsigned char *aname = name;
 	uint32_t crcx;
 	uint64_t key;
 	size_t i, j;

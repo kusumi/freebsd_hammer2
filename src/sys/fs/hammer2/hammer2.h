@@ -61,7 +61,6 @@
 #include <sys/systm.h>
 #include <sys/buf.h>
 #include <sys/errno.h>
-#include <sys/gsb_crc32.h>
 #include <sys/kernel.h>
 #include <sys/malloc.h>
 #include <sys/mount.h>
@@ -662,7 +661,7 @@ int hammer2_get_dtype(uint8_t);
 int hammer2_get_vtype(uint8_t);
 void hammer2_time_to_timespec(uint64_t, struct timespec *);
 uint32_t hammer2_to_unix_xid(const struct uuid *);
-hammer2_key_t hammer2_dirhash(const unsigned char *, size_t);
+hammer2_key_t hammer2_dirhash(const char *aname, size_t len);
 int hammer2_calc_logical(hammer2_inode_t *, hammer2_off_t, hammer2_key_t *,
     hammer2_key_t *);
 int hammer2_get_logical(void);
@@ -724,6 +723,14 @@ hammer2_assert_cluster(const hammer2_cluster_t *cluster)
 	KASSERT(cluster->nchains == 1,
 	    ("unexpected cluster nchains %d", cluster->nchains));
 }
+
+/*
+ * XXX <sys/gsb_crc32.h> and <contrib/zlib/zlib.h> both have a function named
+ * crc32, so they can't be included from the same file.  Then don't even include
+ * <sys/gsb_crc32.h> as all it needs here is a prototype for calculate_crc32c.
+ */
+uint32_t calculate_crc32c(uint32_t crc32c, const unsigned char *buffer,
+    unsigned int length);
 
 static __inline uint32_t
 hammer2_icrc32(const void *buf, size_t size)

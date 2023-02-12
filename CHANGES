@@ -1,3 +1,8 @@
+v1.0.6
+======
+- Sync with DragonFly
+- Remove src/sys/fs/hammer2/zlib
+
 v1.0.5
 ======
 - README.md: Mention https://github.com/kusumi/makefs

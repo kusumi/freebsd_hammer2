@@ -7,7 +7,6 @@ MAN=	hammer2.8
 
 WARNS?=	3
 
-CFLAGS+=	-DXXH_NAMESPACE=h2_
 CFLAGS+=	-I../../sys
 
 LIBADD=		md

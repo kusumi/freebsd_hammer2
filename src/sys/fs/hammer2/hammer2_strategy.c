@@ -42,10 +42,10 @@
 
 #include <vm/uma.h>
 
+#include <contrib/zlib/zlib.h>
+
 #include "hammer2.h"
 #include "hammer2_lz4.h"
-
-#include "zlib/hammer2_zlib.h"
 
 static int hammer2_strategy_read(struct vop_strategy_args *);
 static void hammer2_strategy_read_completion(hammer2_chain_t *,

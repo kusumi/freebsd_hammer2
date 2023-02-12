@@ -74,7 +74,7 @@ const char *hammer2_breftype_to_str(uint8_t type);
 const char *sizetostr(hammer2_off_t size);
 const char *counttostr(hammer2_off_t size);
 hammer2_off_t check_volume(int fd);
-hammer2_key_t dirhash(const unsigned char *name, size_t len);
+hammer2_key_t dirhash(const char *aname, size_t len);
 
 uint32_t calculate_crc32c(uint32_t, const void *, size_t);
 
