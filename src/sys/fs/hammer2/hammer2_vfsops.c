@@ -355,6 +355,8 @@ hammer2_pfsfree(hammer2_pfs_t *pmp)
 		hammer2_spin_destroy(&pmp->lru_spin);
 		hammer2_mtx_destroy(&pmp->xop_lock);
 		hashdestroy(pmp->ipdep_lists, M_HAMMER2, pmp->ipdep_mask);
+		if (pmp->mntpt)
+			free(pmp->mntpt, M_HAMMER2);
 		free(pmp, M_HAMMER2);
 	}
 }
@@ -748,11 +750,13 @@ next_hmp:
 		hammer2_update_pmps(hmp);
 	} else {
 		spmp = hmp->spmp;
+		/* XXX FreeBSD HAMMER2 always has HMNT2_LOCAL set, so ignore.
 		if (hflags & HMNT2_DEVFLAGS)
 			hprintf("Warning: mount flags pertaining to the whole "
 			    "device may only be specified on the first mount "
 			    "of the device: %08x\n",
 			    hflags & HMNT2_DEVFLAGS);
+		*/
 	}
 
 	/*
@@ -858,7 +862,9 @@ next_hmp:
 	/* Initial statfs to prime mnt_stat. */
 	hammer2_statfs(mp, &mp->mnt_stat);
 
-	strlcpy(pmp->mntpt, mntpt, sizeof(pmp->mntpt));
+	KKASSERT(mntpt != NULL);
+	pmp->mntpt = malloc(strlen(mntpt) + 1, M_HAMMER2, M_WAITOK | M_ZERO);
+	strlcpy(pmp->mntpt, mntpt, strlen(mntpt) + 1);
 	vfs_mountedfrom(mp, fspec);
 
 	return (0);
@@ -919,7 +925,7 @@ hammer2_unmount(struct mount *mp, int mntflags)
 
 	/* Still NULL during mount before hammer2_mount_helper() called. */
 	if (pmp == NULL)
-		return(0);
+		return (0);
 
 	KKASSERT(pmp->mp);
 	KKASSERT(pmp->iroot);

@@ -204,10 +204,9 @@ hammer2_xop_bmap(hammer2_xop_t *arg, int clindex)
 	hammer2_inode_t *ip = xop->head.ip1;
 	hammer2_chain_t *chain, *parent;
 	hammer2_key_t lbase, key_dummy;
-	int lblksize, error = 0;
+	int error = 0;
 
-	lblksize = hammer2_get_logical();
-	lbase = (hammer2_key_t)xop->lbn * lblksize;
+	lbase = (hammer2_key_t)xop->lbn * hammer2_get_logical();
 	KKASSERT(((int)lbase & HAMMER2_PBUFMASK) == 0);
 
 	chain = NULL;
@@ -223,14 +222,15 @@ hammer2_xop_bmap(hammer2_xop_t *arg, int clindex)
 	 * NULL chain isn't necessarily an error.
 	 * It could be a zero filled data without physical block assigned.
 	 */
+	xop->offset = HAMMER2_OFF_MASK;
 	chain = hammer2_chain_lookup(&parent, &key_dummy, lbase, lbase,
 	    &error, HAMMER2_LOOKUP_ALWAYS | HAMMER2_LOOKUP_SHARED);
 	if (error == 0) {
 		if (chain) {
 			error = chain->error;
 			if (error == 0)
-				xop->pbn = (chain->bref.data_off &
-				    ~HAMMER2_OFF_MASK_RADIX) / lblksize;
+				xop->offset = chain->bref.data_off &
+				    ~HAMMER2_OFF_MASK_RADIX;
 		} else {
 			error = HAMMER2_ERROR_ENOENT;
 		}

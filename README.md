@@ -19,6 +19,8 @@ FreeBSD [HAMMER2](https://gitweb.dragonflybsd.org/dragonfly.git/blob/HEAD:/sys/v
 
 + FreeBSD src tree under /usr/src by default
 
++ Bash
+
 ## Build
 
         $ cd freebsd_hammer2
@@ -48,4 +50,4 @@ FreeBSD [HAMMER2](https://gitweb.dragonflybsd.org/dragonfly.git/blob/HEAD:/sys/v
 
 + -CURRENT aka upstream FreeBSD is the only tier 1 support branch at the moment.
 
-+ [makefs(8) for Linux](https://github.com/kusumi/makefs) supports HAMMER2 image creation on Linux. There is currently no way to do this on FreeBSD.
++ [makefs(8) for Linux](https://github.com/kusumi/makefs) supports HAMMER2 image creation from a directory contents on Linux. There is currently no way to do this on FreeBSD.

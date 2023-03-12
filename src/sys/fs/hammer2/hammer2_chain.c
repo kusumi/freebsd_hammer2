@@ -727,10 +727,10 @@ hammer2_chain_lock(hammer2_chain_t *chain, int how)
 	atomic_add_int(&chain->lockcnt, 1);
 	if (how & HAMMER2_RESOLVE_SHARED) {
 		if (how & HAMMER2_RESOLVE_LOCKAGAIN) {
-			if (hammer2_mtx_owned(&chain->lock))
-				hammer2_mtx_ex(&chain->lock);
-			else
-				hammer2_mtx_sh(&chain->lock);
+			hammer2_mtx_assert_locked(&chain->lock);
+			hammer2_mtx_assert_sh(&chain->lock);
+			hammer2_mtx_sh(&chain->lock);
+			hammer2_mtx_assert_sh(&chain->lock);
 		} else {
 			hammer2_mtx_sh(&chain->lock);
 		}

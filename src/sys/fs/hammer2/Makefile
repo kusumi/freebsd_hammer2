@@ -5,4 +5,8 @@ SRCS=	vnode_if.h \
 	hammer2_strategy.c hammer2_subr.c hammer2_vfsops.c hammer2_vnops.c \
 	hammer2_xops.c xxhash/xxhash.c
 
+#CFLAGS+=	-DINVARIANTS -DINVARIANT_SUPPORT
+
+WARNS=	5
+
 .include <bsd.kmod.mk>

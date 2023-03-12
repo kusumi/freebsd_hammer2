@@ -1,3 +1,11 @@
+v1.0.7
+======
+- Minor fix and cleanup
+- Sync with DragonFly
+- Sync with NetBSD
+- Fix VOP_LOOKUP and VOP_BMAP
+- Makefile: Change WARNS from 3 to 5 where possible
+
 v1.0.6
 ======
 - Sync with DragonFly

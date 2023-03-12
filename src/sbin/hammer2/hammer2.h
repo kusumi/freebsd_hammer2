@@ -49,6 +49,7 @@
 #include <sys/stat.h>
 #include <sys/sysctl.h>
 #include <sys/disk.h>
+#include <sys/ioctl.h>
 #include <dirent.h>
 
 #include <fs/hammer2/hammer2_disk.h>

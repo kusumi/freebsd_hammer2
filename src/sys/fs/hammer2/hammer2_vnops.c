@@ -222,6 +222,9 @@ hammer2_readdir(struct vop_readdir_args *ap)
 	uint16_t namlen;
 	const char *dname;
 
+	if (ap->a_vp->v_type != VDIR)
+		return (ENOTDIR);
+
 	/* Setup cookies directory entry cookies if requested. */
 	if (ap->a_ncookies) {
 		ncookies = uio->uio_resid / 16 + 1;
@@ -447,6 +450,7 @@ hammer2_bmap(struct vop_bmap_args *ap)
 	hammer2_xop_bmap_t *xop;
 	hammer2_dev_t *hmp;
 	hammer2_inode_t *ip = VTOI(ap->a_vp);
+	hammer2_volume_t *vol;
 	int error;
 
 	hmp = ip->pmp->pfs_hmps[0];
@@ -459,23 +463,35 @@ hammer2_bmap(struct vop_bmap_args *ap)
 	if (ap->a_runb != NULL)
 		*ap->a_runb = 0; /* unsupported */
 
+	/* Initialize with error or nonexistent case first. */
+	if (ap->a_bnp != NULL)
+		*ap->a_bnp = -1;
+
 	xop = hammer2_xop_alloc(ip);
-	xop->lbn = ap->a_bn;
+	xop->lbn = ap->a_bn; /* logical block number */
 	hammer2_xop_start(&xop->head, &hammer2_bmap_desc);
 
 	error = hammer2_xop_collect(&xop->head, 0);
 	error = hammer2_error_to_errno(error);
 	if (error) {
 		/* No physical block assigned. */
-		if (error == ENOENT) {
+		if (error == ENOENT)
 			error = 0;
-			if (ap->a_bnp)
-				*ap->a_bnp = -1;
-		}
 		goto done;
 	}
-	if (ap->a_bnp)
-		*ap->a_bnp = xop->pbn;
+
+	if (xop->offset != HAMMER2_OFF_MASK) {
+		/* Get volume from the result offset. */
+		KKASSERT((xop->offset & HAMMER2_OFF_MASK_RADIX) == 0);
+		vol = hammer2_get_volume(hmp, xop->offset);
+		KKASSERT(vol);
+		KKASSERT(vol->dev);
+		KKASSERT(vol->dev->devvp);
+
+		/* Return physical block number within devvp. */
+		if (ap->a_bnp != NULL)
+			*ap->a_bnp = (xop->offset - vol->offset) / DEV_BSIZE;
+	}
 done:
 	hammer2_xop_retire(&xop->head, HAMMER2_XOPMASK_VOP);
 
@@ -498,8 +514,30 @@ hammer2_nresolve(struct vop_cachedlookup_args *ap)
 
 	dvp = ap->a_dvp;
 	dip = VTOI(dvp);
-	xop = hammer2_xop_alloc(dip);
 
+	/* FreeBSD needs "." and ".." handling. */
+	if (flags & ISDOTDOT) {
+		error = vn_vget_ino(dvp, dip->meta.iparent, cnp->cn_lkflags, &vp);
+		if (VN_IS_DOOMED(dvp)) {
+			if (error == 0)
+				vput(vp);
+			error = ENOENT;
+		}
+		if (error)
+			return (error);
+		*ap->a_vpp = vp;
+		if (flags & MAKEENTRY)
+			cache_enter(dvp, vp, cnp);
+		return (0);
+	} else if (cnp->cn_namelen == 1 && cnp->cn_nameptr[0] == '.') {
+		VREF(dvp); /* We want ourself, i.e. ".". */
+		*ap->a_vpp = dvp;
+		if (flags & MAKEENTRY)
+			cache_enter(dvp, dvp, cnp);
+		return (0);
+	}
+
+	xop = hammer2_xop_alloc(dip);
 	hammer2_xop_setname(&xop->head, cnp->cn_nameptr, cnp->cn_namelen);
 
 	hammer2_inode_lock(dip, HAMMER2_RESOLVE_SHARED);

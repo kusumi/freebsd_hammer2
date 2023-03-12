@@ -46,7 +46,7 @@
 #include <unistd.h>
 #include <err.h>
 #include <sysexits.h>
-#include "./mntopts.h"
+#include "mntopts.h"
 
 static void usage(const char *ctl, ...);
 

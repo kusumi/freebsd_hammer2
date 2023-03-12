@@ -42,6 +42,7 @@
 #include <sys/queue.h>
 #include <sys/ttycom.h>
 #include <sys/disk.h>
+#include <sys/ioctl.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <stdio.h>

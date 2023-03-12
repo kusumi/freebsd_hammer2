@@ -428,9 +428,9 @@ struct hammer2_xop_lookup {
 struct hammer2_xop_bmap {
 	hammer2_xop_head_t	head;
 	daddr_t			lbn;
-	daddr_t			pbn;
 	int			runp;
 	int			runb;
+	hammer2_off_t		offset;
 };
 
 struct hammer2_xop_strategy {
@@ -538,7 +538,7 @@ struct hammer2_pfs {
 	int			flags;		/* for HAMMER2_PMPF_xxx */
 	int			lru_count;	/* #of chains on LRU */
 	unsigned long		ipdep_mask;
-	char			mntpt[128];
+	char			*mntpt;
 };
 
 #define HAMMER2_PMPF_SPMP	0x00000001
