@@ -256,9 +256,9 @@ hammer2_strategy_read_completion(hammer2_chain_t *focus, const char *data,
 			/* b_resid set by call */
 			break;
 		case HAMMER2_COMP_NONE:
-			KKASSERT(focus->bytes <= bp->b_bcount);
+			KKASSERT(focus->bytes <= (unsigned int)bp->b_bcount);
 			bcopy(data, bp->b_data, focus->bytes);
-			if (focus->bytes < bp->b_bcount)
+			if (focus->bytes < (unsigned int)bp->b_bcount)
 				bzero(bp->b_data + focus->bytes,
 				    bp->b_bcount - focus->bytes);
 			bp->b_resid = 0;

@@ -76,6 +76,10 @@ const char *counttostr(hammer2_off_t size);
 hammer2_off_t check_volume(int fd);
 hammer2_key_t dirhash(const char *aname, size_t len);
 
+#define hammer2_icrc32(buf, size)	iscsi_crc32((buf), (size))
+#define hammer2_icrc32c(buf, size, crc)	iscsi_crc32_ext((buf), (size), (crc))
+uint32_t iscsi_crc32(const void *, size_t);
+uint32_t iscsi_crc32_ext(const void *, size_t, uint32_t);
 uint32_t calculate_crc32c(uint32_t, const void *, size_t);
 
 char **get_hammer2_mounts(int *acp);
@@ -105,17 +109,4 @@ hammer2_off_t hammer2_get_root_volume_size(void);
 hammer2_off_t hammer2_get_total_size(void);
 hammer2_volume_data_t* hammer2_read_root_volume_header(void);
 
-static __inline
-uint32_t
-hammer2_icrc32(const void *buf, size_t size)
-{
-	return (~calculate_crc32c(-1, buf, size));
-}
-
-static __inline
-uint32_t
-hammer2_icrc32c(const void *buf, size_t size, uint32_t ocrc)
-{
-	return (~calculate_crc32c(~ocrc, buf, size));
-}
 #endif /* !HAMMER2_HAMMER2_SUBS_H_ */

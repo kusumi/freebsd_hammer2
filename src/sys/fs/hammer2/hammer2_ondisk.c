@@ -290,7 +290,7 @@ hammer2_verify_volumes_common(const hammer2_volume_t *volumes)
 		cp = vol->dev->devvp->v_bufobj.bo_private;
 		KASSERT(cp, ("NULL GEOM consumer"));
 		KASSERT(cp->provider, ("NULL GEOM provider"));
-		if (vol->size > cp->provider->mediasize) {
+		if (vol->size > (hammer2_off_t)cp->provider->mediasize) {
 			hprintf("%s's size %016jx exceeds device size %016jx\n",
 			    path, (intmax_t)vol->size, cp->provider->mediasize);
 			return (EINVAL);
@@ -620,7 +620,7 @@ hammer2_init_volumes(const hammer2_devvp_list_t *devvpl,
 	struct vnode *devvp;
 	struct uuid fsid, fstype;
 	const char *path;
-	int i, error = 0, version = -1, nvolumes = 0;
+	int i, error = 0, v = -1, nvolumes = 0;
 	int zone __diagused;
 
 	for (i = 0; i < HAMMER2_MAX_VOLUMES; ++i) {
@@ -667,15 +667,15 @@ hammer2_init_volumes(const hammer2_devvp_list_t *devvpl,
 		}
 
 		/* All headers must have the same version, nvolumes and uuid. */
-		if (version == -1) {
-			version = voldata->version;
+		if (v == -1) {
+			v = voldata->version;
 			nvolumes = voldata->nvolumes;
 			fsid = voldata->fsid;
 			fstype = voldata->fstype;
 		} else {
-			if (version != (int)voldata->version) {
+			if (v != (int)voldata->version) {
 				hprintf("volume version mismatch %d vs %d\n",
-				    version, (int)voldata->version);
+				    v, (int)voldata->version);
 				error = ENXIO;
 				goto done;
 			}
@@ -698,9 +698,9 @@ hammer2_init_volumes(const hammer2_devvp_list_t *devvpl,
 				goto done;
 			}
 		}
-		if (version < HAMMER2_VOL_VERSION_MIN ||
-		    version > HAMMER2_VOL_VERSION_WIP) {
-			hprintf("bad volume version %d\n", version);
+		if (v < HAMMER2_VOL_VERSION_MIN ||
+		    v > HAMMER2_VOL_VERSION_WIP) {
+			hprintf("bad volume version %d\n", v);
 			error = EINVAL;
 			goto done;
 		}

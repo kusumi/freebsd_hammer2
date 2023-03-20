@@ -38,6 +38,20 @@
 #ifndef _FS_HAMMER2_MOUNT_H_
 #define _FS_HAMMER2_MOUNT_H_
 
+/*
+ * This structure is passed from userland to the kernel during the mount
+ * system call.
+ *
+ * The volume name is formatted as '/dev/ad0s1a@LABEL', where the label is
+ * the mount point under the super-root.
+ */
+struct hammer2_mount_info {
+	char		volume[MAXPATHLEN];
+	int		hflags;		/* extended hammer2 mount flags */
+	int		cluster_fd;	/* cluster management pipe/socket */
+	char		reserved1[112];
+};
+
 #define HMNT2_LOCAL		0x00000002
 
 #define HMNT2_DEVFLAGS		(HMNT2_LOCAL)

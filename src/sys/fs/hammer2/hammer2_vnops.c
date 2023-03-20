@@ -156,9 +156,12 @@ hammer2_setattr(struct vop_setattr_args *ap)
 	struct vnode *vp = ap->a_vp;
 	struct vattr *vap = ap->a_vap;
 
-	if (vap->va_flags != (u_long)VNOVAL || vap->va_uid != (uid_t)VNOVAL ||
-	    vap->va_gid != (gid_t)VNOVAL || vap->va_atime.tv_sec != VNOVAL ||
-	    vap->va_mtime.tv_sec != VNOVAL || vap->va_mode != (mode_t)VNOVAL)
+	if (vap->va_flags != (u_long)VNOVAL ||
+	    vap->va_uid != (uid_t)VNOVAL ||
+	    vap->va_gid != (gid_t)VNOVAL ||
+	    vap->va_atime.tv_sec != (time_t)VNOVAL ||
+	    vap->va_mtime.tv_sec != (time_t)VNOVAL ||
+	    vap->va_mode != (mode_t)VNOVAL)
 		return (EROFS);
 
 	if (vap->va_size != (u_quad_t)VNOVAL) {
@@ -376,18 +379,19 @@ hammer2_read_file(hammer2_inode_t *ip, struct uio *uio, int ioflag)
 	hammer2_off_t isize = ip->meta.size;
 	hammer2_key_t lbase;
 	daddr_t lbn;
-	int lblksize, loff, n, seqcount = 0, error = 0;
+	size_t n;
+	int lblksize, loff, seqcount = 0, error = 0;
 
 	if (ioflag)
 		seqcount = ioflag >> IO_SEQSHIFT;
 
-	while (uio->uio_resid > 0 && uio->uio_offset < isize) {
+	while (uio->uio_resid > 0 && (hammer2_off_t)uio->uio_offset < isize) {
 		lblksize = hammer2_calc_logical(ip, uio->uio_offset, &lbase,
 		    NULL);
 		lbn = lbase / lblksize;
 		bp = NULL;
 
-		if ((lbn + 1) * lblksize >= isize)
+		if ((hammer2_off_t)(lbn + 1) * lblksize >= isize)
 			error = bread(ip->vp, lbn, lblksize, NOCRED, &bp);
 		else if ((vp->v_mount->mnt_flag & MNT_NOCLUSTERR) == 0)
 			error = cluster_read(vp, isize, lbn, lblksize, NOCRED,

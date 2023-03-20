@@ -1,7 +1,7 @@
 /*-
  * SPDX-License-Identifier: BSD-3-Clause
  *
- * Copyright (c) 2022 Tomohiro Kusumi <tkusumi@netbsd.org>
+ * Copyright (c) 2023 Tomohiro Kusumi <tkusumi@netbsd.org>
  * Copyright (c) 2011-2022 The DragonFly Project.  All rights reserved.
  *
  * This code is derived from software contributed to The DragonFly Project
@@ -35,47 +35,19 @@
  * SUCH DAMAGE.
  */
 
-#ifndef NEWFS_HAMMER2_H_
-#define NEWFS_HAMMER2_H_
+#ifndef _FS_HAMMER2_COMPAT_H_
+#define _FS_HAMMER2_COMPAT_H_
 
-#include <fs/hammer2/hammer2_disk.h>
+#include <sys/kassert.h>
 
-#include <uuid.h>
+/* KASSERT variant from DragonFly */
+#ifdef INVARIANTS
+#define KKASSERT(exp)	do { if (__predict_false(!(exp)))	  \
+				panic("assertion \"%s\" failed "  \
+				"in %s at %s:%u", #exp, __func__, \
+				__FILE__, __LINE__); } while (0)
+#else
+#define KKASSERT(exp)	do { } while (0)
+#endif
 
-#include "hammer2_subs.h"
-
-#define HAMMER2_LABEL_NONE	0
-#define HAMMER2_LABEL_BOOT	1
-#define HAMMER2_LABEL_ROOT	2
-#define HAMMER2_LABEL_DATA	3
-
-#define MAXLABELS	HAMMER2_SET_COUNT
-
-typedef struct {
-	int Hammer2Version;
-	uuid_t Hammer2_FSType;	/* filesystem type id for HAMMER2 */
-	uuid_t Hammer2_VolFSID;	/* unique filesystem id in volu header */
-	uuid_t Hammer2_SupCLID;	/* PFS cluster id in super-root inode */
-	uuid_t Hammer2_SupFSID;	/* PFS unique id in super-root inode */
-	uuid_t Hammer2_PfsCLID[MAXLABELS];
-	uuid_t Hammer2_PfsFSID[MAXLABELS];
-	hammer2_off_t BootAreaSize;
-	hammer2_off_t AuxAreaSize;
-	hammer2_off_t FileSystemSize[HAMMER2_MAX_VOLUMES];
-	int NFileSystemSizes;
-	char *Label[MAXLABELS];
-	int NLabels;
-	int CompType; /* default LZ4 */
-	int CheckType; /* default XXHASH64 */
-	int DefaultLabelType;
-	int DebugOpt;
-} hammer2_mkfs_options_t;
-
-void hammer2_mkfs_init(hammer2_mkfs_options_t *opt);
-void hammer2_mkfs_cleanup(hammer2_mkfs_options_t *opt);
-
-int64_t getsize(const char *str, int64_t minval, int64_t maxval, int pw);
-
-void hammer2_mkfs(int ac, char **av, hammer2_mkfs_options_t *opt);
-
-#endif /* !NEWFS_HAMMER2_H_ */
+#endif /* !_FS_HAMMER2_COMPAT_H_ */

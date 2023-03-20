@@ -5,7 +5,7 @@ FreeBSD [HAMMER2](https://gitweb.dragonflybsd.org/dragonfly.git/blob/HEAD:/sys/v
 
 + HAMMER2 file system for FreeBSD (read-only support)
 
-+ Out-of-tree repository for https://github.com/freebsd/freebsd-src/pull/627
++ FreeBSD port of DragonFly BSD's HAMMER2 file system
 
 ## Requirements
 
@@ -17,7 +17,7 @@ FreeBSD [HAMMER2](https://gitweb.dragonflybsd.org/dragonfly.git/blob/HEAD:/sys/v
 
     + Does not compile with 12.X-XXX or below
 
-+ FreeBSD src tree under /usr/src by default
++ FreeBSD src tree under /usr/src
 
 + Bash
 
@@ -39,8 +39,6 @@ FreeBSD [HAMMER2](https://gitweb.dragonflybsd.org/dragonfly.git/blob/HEAD:/sys/v
 ## Ports
 
 + https://www.freshports.org/sysutils/hammer2
-
-+ Also see https://bugs.freebsd.org/bugzilla/show_bug.cgi?id=267982
 
 ## Notes
 

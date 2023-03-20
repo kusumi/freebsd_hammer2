@@ -1,10 +1,10 @@
 .include <bsd.own.mk>
 
 PROG=	fsck_hammer2
-SRCS=	fsck_hammer2.c test.c ondisk.c subs.c xxhash.c gsb_crc32.c
+SRCS=	fsck_hammer2.c test.c ondisk.c subs.c xxhash.c icrc32.c
 MAN=	fsck_hammer2.8
 
-.PATH:	../hammer2 ../../sys/fs/hammer2/xxhash ../../sys/libkern
+.PATH:	../hammer2 ../../sys/libkern ../../sys/fs/hammer2/xxhash
 
 WARNS=	3
 

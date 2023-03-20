@@ -3,6 +3,14 @@
  *  code or tables extracted from it, as desired without restriction.
  */
 
+#include <sys/param.h>
+#ifdef _KERNEL
+#include <sys/systm.h>
+#endif
+
+uint32_t iscsi_crc32(const void *buf, size_t size);
+uint32_t iscsi_crc32_ext(const void *buf, size_t size, uint32_t ocrc);
+
 /*
  *  First, the polynomial itself and its table of feedback terms.  The
  *  polynomial is
@@ -41,28 +49,6 @@
  *
  * CRC32 code derived from work by Gary S. Brown.
  */
-
-#include <sys/cdefs.h>
-__FBSDID("$FreeBSD$");
-
-#include <sys/param.h>
-#include <sys/gsb_crc32.h>
-
-#ifdef _KERNEL
-#include <sys/libkern.h>
-#include <sys/systm.h>
-
-#if defined(__amd64__) || defined(__i386__)
-#include <machine/md_var.h>
-#include <machine/specialreg.h>
-#include <x86/ifunc.h>
-#endif
-
-#if defined(__aarch64__)
-#include <machine/armreg.h>
-#include <machine/ifunc.h>
-#endif
-#endif /* _KERNEL */
 
 const uint32_t crc32_tab[] = {
 	0x00000000, 0x77073096, 0xee0e612c, 0x990951ba, 0x076dc419, 0x706af48f,
@@ -217,13 +203,11 @@ static const uint32_t crc32Table[256] = {
 	0xBE2DA0A5L, 0x4C4623A6L, 0x5F16D052L, 0xAD7D5351L
 };
 
-#ifndef TESTING
-static
-#endif
-uint32_t
+static uint32_t
 singletable_crc32c(uint32_t crc, const void *buf, size_t size)
 {
 	const uint8_t *p = buf;
+
 
 	while (size--)
 		crc = crc32Table[(crc ^ *p++) & 0xff] ^ (crc >> 8);
@@ -231,7 +215,6 @@ singletable_crc32c(uint32_t crc, const void *buf, size_t size)
 	return crc;
 }
 
-#ifndef _STANDALONE
 
 /*
  * Copyright (c) 2004-2006 Intel Corporation - All Rights Reserved
@@ -299,6 +282,8 @@ static const uint32_t sctp_crc_tableil8_o32[256] =
  * end of the CRC lookup table crc_tableil8_o32
  */
 
+
+
 /*
  * The following CRC lookup table was generated automagically using the
  * following model parameters:
@@ -352,6 +337,8 @@ static const uint32_t sctp_crc_tableil8_o40[256] =
 /*
  * end of the CRC lookup table crc_tableil8_o40
  */
+
+
 
 /*
  * The following CRC lookup table was generated automagically using the
@@ -407,6 +394,8 @@ static const uint32_t sctp_crc_tableil8_o48[256] =
  * end of the CRC lookup table crc_tableil8_o48
  */
 
+
+
 /*
  * The following CRC lookup table was generated automagically using the
  * following model parameters:
@@ -460,6 +449,8 @@ static const uint32_t sctp_crc_tableil8_o56[256] =
 /*
  * end of the CRC lookup table crc_tableil8_o56
  */
+
+
 
 /*
  * The following CRC lookup table was generated automagically using the
@@ -515,6 +506,8 @@ static const uint32_t sctp_crc_tableil8_o64[256] =
  * end of the CRC lookup table crc_tableil8_o64
  */
 
+
+
 /*
  * The following CRC lookup table was generated automagically using the
  * following model parameters:
@@ -568,6 +561,8 @@ static const uint32_t sctp_crc_tableil8_o72[256] =
 /*
  * end of the CRC lookup table crc_tableil8_o72
  */
+
+
 
 /*
  * The following CRC lookup table was generated automagically using the
@@ -623,6 +618,8 @@ static const uint32_t sctp_crc_tableil8_o80[256] =
  * end of the CRC lookup table crc_tableil8_o80
  */
 
+
+
 /*
  * The following CRC lookup table was generated automagically using the
  * following model parameters:
@@ -676,6 +673,7 @@ static const uint32_t sctp_crc_tableil8_o88[256] =
 /*
  * end of the CRC lookup table crc_tableil8_o88
  */
+
 
 static uint32_t
 crc32c_sb8_64_bit(uint32_t crc,
@@ -734,13 +732,10 @@ crc32c_sb8_64_bit(uint32_t crc,
 	return crc;
 }
 
-#ifndef TESTING
-static
-#endif
-uint32_t
+static uint32_t
 multitable_crc32c(uint32_t crc32c,
-    const void *buffer,
-    size_t length)
+    const unsigned char *buffer,
+    unsigned int length)
 {
 	uint32_t to_even_word;
 
@@ -751,8 +746,16 @@ multitable_crc32c(uint32_t crc32c,
 	return (crc32c_sb8_64_bit(crc32c, buffer, length, to_even_word));
 }
 
+/*
+ * NOTE: This version does not invert the incoming and outgoing crc.
+ *	 Taken from FreeBSD verbatim, I'm not going to change the API.
+ *
+ * (It doesn't say, but this *IS* the iscsi 32-bit CRC poly)
+ */
 static uint32_t
-table_crc32c(uint32_t crc32c, const unsigned char *buffer, unsigned int length)
+calculate_crc32c(uint32_t crc32c,
+    const unsigned char *buffer,
+    unsigned int length)
 {
 	if (length < 4) {
 		return (singletable_crc32c(crc32c, buffer, length));
@@ -761,42 +764,18 @@ table_crc32c(uint32_t crc32c, const unsigned char *buffer, unsigned int length)
 	}
 }
 
-#if defined(_KERNEL) && defined(__aarch64__)
-DEFINE_IFUNC(, uint32_t, calculate_crc32c,
-    (uint32_t crc32c, const unsigned char *buffer, unsigned int length))
-{
-	uint64_t reg;
-
-	if (get_kernel_reg(ID_AA64ISAR0_EL1, &reg)) {
-		if (ID_AA64ISAR0_CRC32_VAL(reg) >= ID_AA64ISAR0_CRC32_BASE)
-			return (armv8_crc32c);
-	}
-
-	return (table_crc32c);
-}
-#elif defined(_KERNEL) && (defined(__amd64__) || defined(__i386__))
-DEFINE_IFUNC(, uint32_t, calculate_crc32c,
-    (uint32_t crc32c, const unsigned char *buffer, unsigned int length))
-{
-	if ((cpu_feature2 & CPUID2_SSE42) != 0)
-		return (sse42_crc32c);
-
-	return (table_crc32c);
-}
-#else
+/*
+ * DragonFly API takes and returns the expected inverted CRC and the
+ * extension version seeds with 0 and returns the running CRC as expected.
+ */
 uint32_t
-calculate_crc32c(uint32_t crc32c,
-    const unsigned char *buffer,
-    unsigned int length)
+iscsi_crc32(const void *buf, size_t size)
 {
-	return (table_crc32c(crc32c, buffer, length));
+	return (~calculate_crc32c(-1, buf, size));
 }
-#endif /* _KERNEL && __aarch64__ */
 
-#else
 uint32_t
-calculate_crc32c(uint32_t crc32c, const unsigned char *buffer, unsigned int length)
+iscsi_crc32_ext(const void *buf, size_t size, uint32_t ocrc)
 {
-	return (singletable_crc32c(crc32c, buffer, length));
+	return (~calculate_crc32c(~ocrc, buf, size));
 }
-#endif

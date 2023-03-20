@@ -74,21 +74,12 @@
 #include <machine/atomic.h>
 #include <vm/uma.h>
 
+#include "hammer2_compat.h"
 #include "hammer2_disk.h"
 #include "hammer2_rb.h"
 
 /* See FreeBSD src b214fcceacad6b842545150664bd2695c1c2b34f */
 #define FREEBSD_READDIR_COOKIES_64 1400045
-
-/* KASSERT variant from DragonFly */
-#ifdef INVARIANTS
-#define KKASSERT(exp)	do { if (__predict_false(!(exp)))	  \
-				panic("assertion \"%s\" failed "  \
-				"in %s at %s:%u", #exp, __func__, \
-				__FILE__, __LINE__); } while (0)
-#else
-#define KKASSERT(exp)	do { } while (0)
-#endif
 
 /* printf(9) variants for HAMMER2 */
 #ifdef INVARIANTS
@@ -724,23 +715,10 @@ hammer2_assert_cluster(const hammer2_cluster_t *cluster)
 	    ("unexpected cluster nchains %d", cluster->nchains));
 }
 
-/*
- * XXX <sys/gsb_crc32.h> and <contrib/zlib/zlib.h> both have a function named
- * crc32, so they can't be included from the same file.  Then don't even include
- * <sys/gsb_crc32.h> as all it needs here is a prototype for calculate_crc32c.
- */
-uint32_t calculate_crc32c(uint32_t crc32c, const unsigned char *buffer,
-    unsigned int length);
+uint32_t iscsi_crc32(const void *, size_t);
+uint32_t iscsi_crc32_ext(const void *, size_t, uint32_t);
 
-static __inline uint32_t
-hammer2_icrc32(const void *buf, size_t size)
-{
-	return (~calculate_crc32c(-1, buf, size));
-}
+#define hammer2_icrc32(buf, size)	iscsi_crc32((buf), (size))
+#define hammer2_icrc32c(buf, size, crc)	iscsi_crc32_ext((buf), (size), (crc))
 
-static __inline uint32_t
-hammer2_icrc32c(const void *buf, size_t size, uint32_t ocrc)
-{
-	return (~calculate_crc32c(~ocrc, buf, size));
-}
 #endif /* !_FS_HAMMER2_HAMMER2_H_ */

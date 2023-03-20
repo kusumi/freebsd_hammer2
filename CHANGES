@@ -1,3 +1,10 @@
+v1.0.8
+======
+- Minor fix and cleanup
+- Sync with DragonFly
+- Sync with NetBSD
+- Replace gsb_crc32.c with icrc32.c
+
 v1.0.7
 ======
 - Minor fix and cleanup

@@ -47,16 +47,16 @@
 static int
 hammer2_ioctl_version_get(hammer2_inode_t *ip, void *data)
 {
-	hammer2_ioc_version_t *version = data;
+	hammer2_ioc_version_t *v = data;
 	hammer2_dev_t *hmp = ip->pmp->pfs_hmps[0];
 
 	if (hmp == NULL)
 		return (EINVAL);
 
 	if (hmp)
-		version->version = hmp->voldata.version;
+		v->version = hmp->voldata.version;
 	else
-		version->version = -1;
+		v->version = -1;
 
 	return (0);
 }

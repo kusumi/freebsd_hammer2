@@ -7,7 +7,6 @@ if [ "${DIR}" = "" ]; then
 	DIR=/usr/local
 fi
 
-[ -e /usr/bin/install ] || exit 1
 [ -e /usr/sbin/kldxref ] || exit 1
 
 [ ! -f /boot/modules/hammer2.ko ] || /bin/rm /boot/modules/hammer2.ko

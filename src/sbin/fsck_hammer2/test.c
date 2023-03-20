@@ -931,7 +931,7 @@ verify_blockref(const hammer2_volume_data_t *voldata,
 		break;
 	case HAMMER2_CHECK_SHA192:
 		SHA256_Init(&hash_ctx);
-		SHA256_Update(&hash_ctx, &media, bytes);
+		SHA256_Update(&hash_ctx, (const uint8_t*)media.buf, bytes);
 		SHA256_Final(u.digest, &hash_ctx);
 		u.digest64[2] ^= u.digest64[3];
 		if (memcmp(u.digest, bref->check.sha192.data,
