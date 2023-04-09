@@ -87,9 +87,6 @@ hammer2_access(struct vop_access_args *ap)
 	gid_t gid;
 	mode_t mode;
 
-	if (vp->v_type == VCHR || vp->v_type == VBLK)
-		return (EOPNOTSUPP);
-
 	/*
 	 * Disallow write attempts unless the file is a socket,
 	 * fifo resident on the filesystem.
@@ -156,12 +153,20 @@ hammer2_setattr(struct vop_setattr_args *ap)
 	struct vnode *vp = ap->a_vp;
 	struct vattr *vap = ap->a_vap;
 
-	if (vap->va_flags != (u_long)VNOVAL ||
-	    vap->va_uid != (uid_t)VNOVAL ||
-	    vap->va_gid != (gid_t)VNOVAL ||
-	    vap->va_atime.tv_sec != (time_t)VNOVAL ||
-	    vap->va_mtime.tv_sec != (time_t)VNOVAL ||
-	    vap->va_mode != (mode_t)VNOVAL)
+	if (vap->va_type != VNON
+	    || vap->va_nlink != (nlink_t)VNOVAL
+	    || vap->va_fsid != (dev_t)VNOVAL
+	    || vap->va_fileid != (ino_t)VNOVAL
+	    || vap->va_blocksize != (long)VNOVAL
+	    || vap->va_rdev != (dev_t)VNOVAL
+	    || vap->va_bytes != (u_quad_t)VNOVAL
+	    || vap->va_gen != (u_long)VNOVAL
+	    || vap->va_flags != (u_long)VNOVAL
+	    || vap->va_uid != (uid_t)VNOVAL
+	    || vap->va_gid != (gid_t)VNOVAL
+	    || vap->va_atime.tv_sec != (time_t)VNOVAL
+	    || vap->va_mtime.tv_sec != (time_t)VNOVAL
+	    || vap->va_mode != (mode_t)VNOVAL)
 		return (EROFS);
 
 	if (vap->va_size != (u_quad_t)VNOVAL) {
@@ -175,13 +180,13 @@ hammer2_setattr(struct vop_setattr_args *ap)
 		case VBLK:
 		case VSOCK:
 		case VFIFO:
-		case VNON:
-		case VBAD:
-		case VMARKER:
 			return (0);
+		default:
+			return (EINVAL);
 		}
 	}
-	return (0);
+
+	return (EINVAL);
 }
 
 static int
@@ -505,22 +510,17 @@ done:
 static int
 hammer2_nresolve(struct vop_cachedlookup_args *ap)
 {
-	hammer2_xop_nresolve_t *xop;
-	hammer2_inode_t *ip, *dip;
-	struct vnode *vp, *dvp;
+	struct vnode *vp, *dvp = ap->a_dvp;
 	struct componentname *cnp = ap->a_cnp;
-	int nameiop = cnp->cn_nameiop;
+	hammer2_xop_nresolve_t *xop;
+	hammer2_inode_t *ip, *dip = VTOI(dvp);
 	int error;
-	u_int64_t flags = cnp->cn_flags;
 
 	KKASSERT(ap->a_vpp);
 	*ap->a_vpp = NULL;
 
-	dvp = ap->a_dvp;
-	dip = VTOI(dvp);
-
 	/* FreeBSD needs "." and ".." handling. */
-	if (flags & ISDOTDOT) {
+	if (cnp->cn_flags & ISDOTDOT) {
 		error = vn_vget_ino(dvp, dip->meta.iparent, cnp->cn_lkflags, &vp);
 		if (VN_IS_DOOMED(dvp)) {
 			if (error == 0)
@@ -530,13 +530,13 @@ hammer2_nresolve(struct vop_cachedlookup_args *ap)
 		if (error)
 			return (error);
 		*ap->a_vpp = vp;
-		if (flags & MAKEENTRY)
+		if (cnp->cn_flags & MAKEENTRY)
 			cache_enter(dvp, vp, cnp);
 		return (0);
 	} else if (cnp->cn_namelen == 1 && cnp->cn_nameptr[0] == '.') {
 		VREF(dvp); /* We want ourself, i.e. ".". */
 		*ap->a_vpp = dvp;
-		if (flags & MAKEENTRY)
+		if (cnp->cn_flags & MAKEENTRY)
 			cache_enter(dvp, dvp, cnp);
 		return (0);
 	}
@@ -559,18 +559,18 @@ hammer2_nresolve(struct vop_cachedlookup_args *ap)
 		error = hammer2_igetv(ip, LK_EXCLUSIVE, &vp);
 		if (error == 0) {
 			*ap->a_vpp = vp;
-			if (flags & MAKEENTRY)
+			if (cnp->cn_flags & MAKEENTRY)
 				cache_enter(dvp, vp, cnp);
 		} else if (error == ENOENT) {
-			if (flags & MAKEENTRY)
+			if (cnp->cn_flags & MAKEENTRY)
 				cache_enter(dvp, NULL, cnp);
 		}
 		hammer2_inode_unlock(ip);
 	} else {
-		if (flags & MAKEENTRY)
+		if (cnp->cn_flags & MAKEENTRY)
 			cache_enter(dvp, NULL, cnp);
-		if ((flags & ISLASTCN) &&
-		    (nameiop == CREATE || nameiop == RENAME))
+		if ((cnp->cn_flags & ISLASTCN) &&
+		    (cnp->cn_nameiop == CREATE || cnp->cn_nameiop == RENAME))
 			error = EROFS;
 		else
 			error = ENOENT;

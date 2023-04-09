@@ -54,7 +54,11 @@ static void hammer2_strategy_read_completion(hammer2_chain_t *,
 int
 hammer2_strategy(struct vop_strategy_args *ap)
 {
+	struct vnode *vp = ap->a_vp;
 	struct buf *bp = ap->a_bp;
+
+	if (vp->v_type == VBLK || vp->v_type == VCHR)
+		hpanic("spec %d", vp->v_type);
 
 	switch (bp->b_iocmd) {
 	case BIO_READ:
@@ -85,7 +89,7 @@ hammer2_decompress_LZ4_callback(const char *data, unsigned int bytes,
 	compressed_size = *(const int *)data;
 	KKASSERT((uint32_t)compressed_size <= bytes - sizeof(int));
 
-	compressed_buffer = uma_zalloc(zone_buffer_read, M_WAITOK);
+	compressed_buffer = uma_zalloc(hammer2_rbuf_zone, M_WAITOK);
 	result = LZ4_decompress_safe(__DECONST(char *, &data[sizeof(int)]),
 	    compressed_buffer, compressed_size, bp->b_bufsize);
 	if (result < 0) {
@@ -99,7 +103,7 @@ hammer2_decompress_LZ4_callback(const char *data, unsigned int bytes,
 	bcopy(compressed_buffer, bp->b_data, bp->b_bufsize);
 	if (result < bp->b_bufsize)
 		bzero(bp->b_data + result, bp->b_bufsize - result);
-	uma_zfree(zone_buffer_read, compressed_buffer);
+	uma_zfree(hammer2_rbuf_zone, compressed_buffer);
 	bp->b_resid = 0;
 }
 
@@ -122,7 +126,7 @@ hammer2_decompress_ZLIB_callback(const char *data, unsigned int bytes,
 	if (result != Z_OK)
 		hprintf("fatal error in inflateInit\n");
 
-	compressed_buffer = uma_zalloc(zone_buffer_read, M_WAITOK);
+	compressed_buffer = uma_zalloc(hammer2_rbuf_zone, M_WAITOK);
 	strm_decompress.next_in = __DECONST(char *, data);
 
 	/* XXX Supply proper size, subset of device bp. */
@@ -139,7 +143,7 @@ hammer2_decompress_ZLIB_callback(const char *data, unsigned int bytes,
 	result = bp->b_bufsize - strm_decompress.avail_out;
 	if (result < bp->b_bufsize)
 		bzero(bp->b_data + result, strm_decompress.avail_out);
-	uma_zfree(zone_buffer_read, compressed_buffer);
+	uma_zfree(hammer2_rbuf_zone, compressed_buffer);
 	inflateEnd(&strm_decompress);
 
 	bp->b_resid = 0;

@@ -114,7 +114,7 @@ mount_hammer2_parseargs(int argc, char **argv,
 		free(tmp);
 	}
 
-	strlcpy(args->volume, canon_dev, sizeof(args->volume));
+	args->volume = canon_dev;
 	args->hflags = HMNT2_LOCAL; /* force local, not optional */
 }
 

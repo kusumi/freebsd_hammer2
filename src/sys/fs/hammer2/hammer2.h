@@ -529,7 +529,6 @@ struct hammer2_pfs {
 	int			flags;		/* for HAMMER2_PMPF_xxx */
 	int			lru_count;	/* #of chains on LRU */
 	unsigned long		ipdep_mask;
-	char			*mntpt;
 };
 
 #define HAMMER2_PMPF_SPMP	0x00000001
@@ -550,8 +549,9 @@ struct hammer2_pfs {
 #define VTOI(vp)	((hammer2_inode_t *)(vp)->v_data)
 
 MALLOC_DECLARE(M_HAMMER2);
-extern uma_zone_t zone_buffer_read;
-extern uma_zone_t zone_xops;
+extern uma_zone_t hammer2_inode_zone;
+extern uma_zone_t hammer2_xops_zone;
+extern uma_zone_t hammer2_rbuf_zone;
 
 extern int hammer2_cluster_meta_read;
 extern int hammer2_cluster_data_read;
@@ -713,6 +713,14 @@ hammer2_assert_cluster(const hammer2_cluster_t *cluster)
 	/* Currently a valid cluster can only have 1 nchains. */
 	KASSERT(cluster->nchains == 1,
 	    ("unexpected cluster nchains %d", cluster->nchains));
+}
+
+static __inline void
+hammer2_assert_inode_meta(const hammer2_inode_t *ip)
+{
+	KASSERT(ip, ("NULL ip"));
+	KASSERT(ip->meta.mode, ("mode 0"));
+	KASSERT(ip->meta.type, ("type 0"));
 }
 
 uint32_t iscsi_crc32(const void *, size_t);

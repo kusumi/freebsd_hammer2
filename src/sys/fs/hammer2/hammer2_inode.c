@@ -38,9 +38,10 @@
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/lock.h>
-#include <sys/malloc.h>
 #include <sys/tree.h>
 #include <sys/vnode.h>
+
+#include <vm/uma.h>
 
 #include "hammer2.h"
 
@@ -205,7 +206,7 @@ hammer2_inode_drop(hammer2_inode_t *ip)
 
 	while (ip) {
 		refs = ip->refs;
-		__compiler_membar();
+		cpu_ccfence();
 		if (refs == 1) {
 			/*
 			 * Transition to zero, must interlock with
@@ -235,7 +236,7 @@ hammer2_inode_drop(hammer2_inode_t *ip)
 				hammer2_mtx_destroy(&ip->lock);
 				hammer2_spin_destroy(&ip->cluster_spin);
 
-				free(ip, M_HAMMER2);
+				uma_zfree(hammer2_inode_zone, ip);
 				atomic_add_long(&hammer2_inode_allocs, -1);
 				ip = NULL; /* Will terminate loop. */
 			} else {
@@ -264,12 +265,14 @@ hammer2_igetv(hammer2_inode_t *ip, int flags, struct vnode **vpp)
 	hammer2_tid_t inum;
 	int error;
 
-	hammer2_mtx_assert_locked(&ip->lock);
-
 	KKASSERT(ip);
 	KKASSERT(ip->pmp);
 	KKASSERT(ip->pmp->mp);
+
 	mp = ip->pmp->mp;
+
+	hammer2_mtx_assert_locked(&ip->lock);
+	hammer2_assert_inode_meta(ip);
 	inum = ip->meta.inum & HAMMER2_DIRHASH_USERMSK;
 
 	error = vfs_hash_get(mp, inum, flags, td, vpp, NULL, NULL);
@@ -282,6 +285,8 @@ hammer2_igetv(hammer2_inode_t *ip, int flags, struct vnode **vpp)
 		return (error);
 	}
 	KKASSERT(vp);
+	KKASSERT(VOP_ISLOCKED(vp) == 0);
+	KKASSERT(vp->v_op == &hammer2_vnodeops);
 
 	lockmgr(vp->v_vnlock, LK_EXCLUSIVE, NULL);
 	vp->v_data = ip;
@@ -298,8 +303,6 @@ hammer2_igetv(hammer2_inode_t *ip, int flags, struct vnode **vpp)
 	if (error || *vpp != NULL)
 		return (error);
 
-	KASSERT(ip->meta.mode, ("mode 0"));
-	KASSERT(ip->meta.type, ("type 0"));
 	vp->v_type = hammer2_get_vtype(ip->meta.type);
 	KASSERT(vp->v_type != VBAD, ("VBAD"));
 	KASSERT(vp->v_type != VNON, ("VNON"));
@@ -391,7 +394,7 @@ again:
 	 * We couldn't find the inode number, create a new inode and try to
 	 * insert it, handle insertion races.
 	 */
-	nip = malloc(sizeof(*nip), M_HAMMER2, M_WAITOK | M_ZERO);
+	nip = uma_zalloc(hammer2_inode_zone, M_WAITOK | M_ZERO);
 	atomic_add_long(&hammer2_inode_allocs, 1);
 	hammer2_spin_init(&nip->cluster_spin, "h2ip_clsp");
 

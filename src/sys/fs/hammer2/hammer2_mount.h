@@ -46,7 +46,7 @@
  * the mount point under the super-root.
  */
 struct hammer2_mount_info {
-	char		volume[MAXPATHLEN];
+	char		*volume;
 	int		hflags;		/* extended hammer2 mount flags */
 	int		cluster_fd;	/* cluster management pipe/socket */
 	char		reserved1[112];

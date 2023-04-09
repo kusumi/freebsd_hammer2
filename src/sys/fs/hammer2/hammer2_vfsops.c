@@ -58,8 +58,9 @@ static void hammer2_unmount_helper(struct mount *, hammer2_pfs_t *,
     hammer2_dev_t *);
 
 MALLOC_DEFINE(M_HAMMER2, "hammer2_mount", "HAMMER2 mount structure");
-uma_zone_t zone_buffer_read;
-uma_zone_t zone_xops;
+uma_zone_t hammer2_inode_zone;
+uma_zone_t hammer2_xops_zone;
+uma_zone_t hammer2_rbuf_zone;
 
 /* global list of HAMMER2 */
 TAILQ_HEAD(hammer2_mntlist, hammer2_dev); /* <-> hammer2_dev::mntentry */
@@ -107,21 +108,23 @@ hammer2_assert_clean(void)
 {
 	int error = 0;
 
-	KKASSERT(hammer2_inode_allocs == 0);
 	if (hammer2_inode_allocs > 0) {
 		hprintf("%ld inode left\n", hammer2_inode_allocs);
 		error = EINVAL;
 	}
-	KKASSERT(hammer2_chain_allocs == 0);
+	KKASSERT(hammer2_inode_allocs == 0);
+
 	if (hammer2_chain_allocs > 0) {
 		hprintf("%ld chain left\n", hammer2_chain_allocs);
 		error = EINVAL;
 	}
-	KKASSERT(hammer2_dio_allocs == 0);
+	KKASSERT(hammer2_chain_allocs == 0);
+
 	if (hammer2_dio_allocs > 0) {
 		hprintf("%ld dio left\n", hammer2_dio_allocs);
 		error = EINVAL;
 	}
+	KKASSERT(hammer2_dio_allocs == 0);
 
 	return (error);
 }
@@ -135,21 +138,18 @@ hammer2_init(struct vfsconf *vfsp)
 	if (hammer2_dio_limit > 100000)
 		hammer2_dio_limit = 100000;
 
-	zone_buffer_read = uma_zcreate("hammer2_buffer_read", 65536,
+	/* uma_zcreate(9) never returns NULL. */
+	hammer2_inode_zone = uma_zcreate("h2inozone", sizeof(hammer2_inode_t),
 	    NULL, NULL, NULL, NULL, UMA_ALIGN_PTR, 0);
-	if (zone_buffer_read == NULL) {
-		hprintf("failed to create zone_buffer_read\n");
-		return (ENOMEM);
-	}
+	KKASSERT(hammer2_inode_zone);
 
-	zone_xops = uma_zcreate("hammer2_xops", sizeof(hammer2_xop_t),
+	hammer2_xops_zone = uma_zcreate("h2xopszone", sizeof(hammer2_xop_t),
 	    NULL, NULL, NULL, NULL, UMA_ALIGN_PTR, 0);
-	if (zone_xops == NULL) {
-		uma_zdestroy(zone_buffer_read);
-		zone_buffer_read = NULL;
-		hprintf("failed to create zone_xops\n");
-		return (ENOMEM);
-	}
+	KKASSERT(hammer2_xops_zone);
+
+	hammer2_rbuf_zone = uma_zcreate("h2rbufzone", 65536,
+	    NULL, NULL, NULL, NULL, UMA_ALIGN_PTR, 0);
+	KKASSERT(hammer2_rbuf_zone);
 
 	lockinit(&hammer2_mntlk, PVFS, "mntlk", 0, 0);
 
@@ -165,13 +165,17 @@ hammer2_uninit(struct vfsconf *vfsp)
 {
 	lockdestroy(&hammer2_mntlk);
 
-	if (zone_buffer_read) {
-		uma_zdestroy(zone_buffer_read);
-		zone_buffer_read = NULL;
+	if (hammer2_inode_zone) {
+		uma_zdestroy(hammer2_inode_zone);
+		hammer2_inode_zone = NULL;
 	}
-	if (zone_xops) {
-		uma_zdestroy(zone_xops);
-		zone_xops = NULL;
+	if (hammer2_xops_zone) {
+		uma_zdestroy(hammer2_xops_zone);
+		hammer2_xops_zone = NULL;
+	}
+	if (hammer2_rbuf_zone) {
+		uma_zdestroy(hammer2_rbuf_zone);
+		hammer2_rbuf_zone = NULL;
 	}
 
 	hammer2_assert_clean();
@@ -334,11 +338,8 @@ hammer2_pfsfree(hammer2_pfs_t *pmp)
 	if (iroot) {
 		for (i = 0; i < iroot->cluster.nchains; ++i) {
 			chain = iroot->cluster.array[i].chain;
-			if (chain && !RB_EMPTY(&chain->core.rbtree)) {
-				hprintf("PFS at %s has active chains\n",
-				    pmp->mntpt);
+			if (chain && !RB_EMPTY(&chain->core.rbtree))
 				chains_still_present = 1;
-			}
 		}
 		KASSERT(iroot->refs == 1,
 		    ("iroot %p refs %d not 1", iroot, iroot->refs));
@@ -349,14 +350,14 @@ hammer2_pfsfree(hammer2_pfs_t *pmp)
 
 	/* Free remaining pmp resources. */
 	if (chains_still_present) {
-		hprintf("PFS at %s still in use\n", pmp->mntpt);
+		KKASSERT(pmp->mp);
+		hprintf("PFS at %s still in use\n",
+		    pmp->mp->mnt_stat.f_mntonname);
 	} else {
 		hammer2_spin_destroy(&pmp->inum_spin);
 		hammer2_spin_destroy(&pmp->lru_spin);
 		hammer2_mtx_destroy(&pmp->xop_lock);
 		hashdestroy(pmp->ipdep_lists, M_HAMMER2, pmp->ipdep_mask);
-		if (pmp->mntpt)
-			free(pmp->mntpt, M_HAMMER2);
 		free(pmp, M_HAMMER2);
 	}
 }
@@ -726,7 +727,7 @@ next_hmp:
 		 *
 		 * The returned inode is locked with the supplied cluster.
 		 */
-		xop = uma_zalloc(zone_xops, M_WAITOK | M_ZERO);
+		xop = uma_zalloc(hammer2_xops_zone, M_WAITOK | M_ZERO);
 		hammer2_dummy_xop_from_chain(xop, schain);
 		hammer2_inode_drop(spmp->iroot);
 		spmp->iroot = hammer2_inode_get(spmp, xop, -1, -1);
@@ -738,7 +739,7 @@ next_hmp:
 		hammer2_chain_unlock(schain);
 		hammer2_chain_drop(schain);
 		schain = NULL;
-		uma_zfree(zone_xops, xop);
+		uma_zfree(hammer2_xops_zone, xop);
 		/* Leave spmp->iroot with one ref. */
 
 		/*
@@ -862,9 +863,6 @@ next_hmp:
 	/* Initial statfs to prime mnt_stat. */
 	hammer2_statfs(mp, &mp->mnt_stat);
 
-	KKASSERT(mntpt != NULL);
-	pmp->mntpt = malloc(strlen(mntpt) + 1, M_HAMMER2, M_WAITOK | M_ZERO);
-	strlcpy(pmp->mntpt, mntpt, strlen(mntpt) + 1);
 	vfs_mountedfrom(mp, fspec);
 
 	return (0);
@@ -1005,7 +1003,7 @@ hammer2_unmount_helper(struct mount *mp, hammer2_pfs_t *pmp, hammer2_dev_t *hmp)
 	if (pmp) {
 		KKASSERT(hmp == NULL);
 		KKASSERT(MPTOPMP(mp) == pmp);
-		pmp->mp = NULL;
+		//pmp->mp = NULL; /* still uses pmp->mp->mnt_stat */
 		mp->mnt_data = NULL;
 
 		/*

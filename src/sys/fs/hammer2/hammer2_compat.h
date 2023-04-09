@@ -38,6 +38,7 @@
 #ifndef _FS_HAMMER2_COMPAT_H_
 #define _FS_HAMMER2_COMPAT_H_
 
+#include <sys/cdefs.h>
 #include <sys/kassert.h>
 
 /* KASSERT variant from DragonFly */
@@ -49,5 +50,7 @@
 #else
 #define KKASSERT(exp)	do { } while (0)
 #endif
+
+#define cpu_ccfence	__compiler_membar
 
 #endif /* !_FS_HAMMER2_COMPAT_H_ */

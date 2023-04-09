@@ -63,28 +63,29 @@ H2XOPDESCRIPTOR(strategy_read);
  * threads wait for frontend to collect results.
  */
 static void
-hammer2_xop_fifo_alloc(hammer2_xop_fifo_t *fifo, int fifo_size)
+hammer2_xop_fifo_alloc(hammer2_xop_fifo_t *fifo, size_t nmemb)
 {
-	struct malloc_type *type = M_HAMMER2;
 	int flags = M_WAITOK | M_ZERO;
 	size_t size;
 
-	KKASSERT((fifo_size & (fifo_size - 1)) == 0);
-	KKASSERT(fifo_size >= HAMMER2_XOPFIFO);
-	KKASSERT(fifo_size <= INT_MAX);
+	/* Assert nmemb requirements. */
+	KKASSERT((nmemb & (nmemb - 1)) == 0);
+	KKASSERT(nmemb >= HAMMER2_XOPFIFO);
 
-	size = sizeof(hammer2_chain_t*) * fifo_size;
+	/* malloc or realloc fifo array. */
+	size = nmemb * sizeof(hammer2_chain_t *);
 	if (!fifo->array)
-		fifo->array = malloc(size, type, flags);
+		fifo->array = malloc(size, M_HAMMER2, flags);
 	else
-		fifo->array = realloc(fifo->array, size, type, flags);
+		fifo->array = realloc(fifo->array, size, M_HAMMER2, flags);
 	KKASSERT(fifo->array);
 
-	size = sizeof(int) * fifo_size;
+	/* malloc or realloc fifo errors. */
+	size = nmemb * sizeof(int);
 	if (!fifo->errors)
-		fifo->errors = malloc(size, type, flags);
+		fifo->errors = malloc(size, M_HAMMER2, flags);
 	else
-		fifo->errors = realloc(fifo->errors, size, type, flags);
+		fifo->errors = realloc(fifo->errors, size, M_HAMMER2, flags);
 	KKASSERT(fifo->errors);
 }
 
@@ -98,7 +99,7 @@ hammer2_xop_alloc(hammer2_inode_t *ip)
 {
 	hammer2_xop_t *xop;
 
-	xop = uma_zalloc(zone_xops, M_WAITOK | M_ZERO);
+	xop = uma_zalloc(hammer2_xops_zone, M_WAITOK | M_ZERO);
 	KKASSERT(xop->head.cluster.array[0].chain == NULL);
 
 	xop->head.ip1 = ip;
@@ -308,7 +309,7 @@ hammer2_xop_retire(hammer2_xop_head_t *xop, uint32_t mask)
 		free(fifo->errors, M_HAMMER2);
 	}
 
-	uma_zfree(zone_xops, xop);
+	uma_zfree(hammer2_xops_zone, xop);
 }
 
 /*

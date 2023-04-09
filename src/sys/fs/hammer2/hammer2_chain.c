@@ -254,7 +254,7 @@ hammer2_chain_drop(hammer2_chain_t *chain)
 
 	while (chain) {
 		refs = chain->refs;
-		__compiler_membar();
+		cpu_ccfence();
 
 		KKASSERT(refs > 0);
 		if (refs == 1) {
@@ -283,7 +283,7 @@ hammer2_chain_unhold(hammer2_chain_t *chain)
 
 	for (;;) {
 		lockcnt = chain->lockcnt;
-		__compiler_membar();
+		cpu_ccfence();
 
 		if (lockcnt > 1) {
 			if (atomic_cmpset_int(&chain->lockcnt, lockcnt,
@@ -629,7 +629,7 @@ again:
 	 */
 	while (chain) {
 		refs = chain->refs;
-		__compiler_membar();
+		cpu_ccfence();
 		KKASSERT(refs > 0);
 
 		if (refs == 1) {
@@ -889,7 +889,7 @@ hammer2_chain_unlock(hammer2_chain_t *chain)
 	for (;;) {
 		lockcnt = chain->lockcnt;
 		KKASSERT(lockcnt > 0);
-		__compiler_membar();
+		cpu_ccfence();
 
 		if (lockcnt > 1) {
 			if (atomic_cmpset_int(&chain->lockcnt, lockcnt,
@@ -1561,7 +1561,7 @@ hammer2_base_find(hammer2_chain_t *parent, hammer2_blockref_t *base, int count,
 	 * we might have to check the whole block array.
 	 */
 	i = parent->cache_index;	/* SMP RACE OK */
-	__compiler_membar();
+	cpu_ccfence();
 	limit = parent->core.live_zero;
 	if (i >= limit)
 		i = limit - 1;
@@ -1734,7 +1734,7 @@ hammer2_chain_testcheck(const hammer2_chain_t *chain, void *bdata)
 		    hammer2_icrc32(bdata, chain->bytes);
 		break;
 	default:
-		hpanic("unknown check type %02x\n", chain->bref.methods);
+		hpanic("unknown check type %02x", chain->bref.methods);
 		break;
 	}
 
