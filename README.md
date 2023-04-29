@@ -5,7 +5,7 @@ FreeBSD [HAMMER2](https://gitweb.dragonflybsd.org/dragonfly.git/blob/HEAD:/sys/v
 
 + HAMMER2 file system for FreeBSD (currently read-only support)
 
-+ FreeBSD port of DragonFly BSD's HAMMER2 file system
++ FreeBSD version of https://github.com/kusumi/openbsd_hammer2
 
 ## Requirements
 
@@ -44,4 +44,4 @@ FreeBSD [HAMMER2](https://gitweb.dragonflybsd.org/dragonfly.git/blob/HEAD:/sys/v
 
 + Tags are merely for packaging, nothing directly to do with file system version.
 
-+ [makefs(8) for Linux](https://github.com/kusumi/makefs) supports HAMMER2 image creation from a directory contents on Linux. There is currently no way to do this on FreeBSD.
++ [makefs](https://github.com/kusumi/makefs) supports HAMMER2 image creation from a directory contents.

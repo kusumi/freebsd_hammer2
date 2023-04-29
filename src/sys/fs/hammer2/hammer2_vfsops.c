@@ -1,7 +1,7 @@
 /*-
  * SPDX-License-Identifier: BSD-3-Clause
  *
- * Copyright (c) 2022 Tomohiro Kusumi <tkusumi@netbsd.org>
+ * Copyright (c) 2022-2023 Tomohiro Kusumi <tkusumi@netbsd.org>
  * Copyright (c) 2011-2022 The DragonFly Project.  All rights reserved.
  *
  * This code is derived from software contributed to The DragonFly Project
@@ -135,7 +135,7 @@ hammer2_init(struct vfsconf *vfsp)
 	hammer2_assert_clean();
 
 	hammer2_dio_limit = nbuf * 2;
-	if (hammer2_dio_limit > 100000)
+	if (hammer2_dio_limit > 100000 || hammer2_dio_limit < 0)
 		hammer2_dio_limit = 100000;
 
 	/* uma_zcreate(9) never returns NULL. */
@@ -279,7 +279,7 @@ hammer2_pfsalloc(hammer2_chain_t *chain, const hammer2_inode_data_t *ripdata,
 		pmp->pfs_types[j] = HAMMER2_PFSTYPE_MASTER;
 	else
 		pmp->pfs_types[j] = ripdata->meta.pfs_type;
-	pmp->pfs_names[j] = strdup((const char *)ripdata->filename, M_HAMMER2);
+	pmp->pfs_names[j] = kstrdup((const char *)ripdata->filename);
 	pmp->pfs_hmps[j] = chain->hmp;
 
 	/*
@@ -408,7 +408,7 @@ again:
 			iroot->cluster.array[i].chain = NULL;
 			pmp->pfs_types[i] = HAMMER2_PFSTYPE_NONE;
 			if (pmp->pfs_names[i]) {
-				free(pmp->pfs_names[i], M_HAMMER2);
+				kstrfree(pmp->pfs_names[i]);
 				pmp->pfs_names[i] = NULL;
 			}
 			if (rchain) {
@@ -750,6 +750,8 @@ next_hmp:
 		 */
 		hammer2_update_pmps(hmp);
 	} else {
+		/* hmp->devvp_list is already constructed. */
+		hammer2_cleanup_devvp(&devvpl);
 		spmp = hmp->spmp;
 		/* XXX FreeBSD HAMMER2 always has HMNT2_LOCAL set, so ignore.
 		if (hflags & HMNT2_DEVFLAGS)
@@ -1005,6 +1007,7 @@ hammer2_unmount_helper(struct mount *mp, hammer2_pfs_t *pmp, hammer2_dev_t *hmp)
 		KKASSERT(MPTOPMP(mp) == pmp);
 		//pmp->mp = NULL; /* still uses pmp->mp->mnt_stat */
 		mp->mnt_data = NULL;
+		mp->mnt_flag &= ~MNT_LOCAL;
 
 		/*
 		 * After pmp->mp is cleared we have to account for

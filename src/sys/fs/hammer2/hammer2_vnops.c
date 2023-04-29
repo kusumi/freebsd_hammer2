@@ -1,7 +1,7 @@
 /*-
  * SPDX-License-Identifier: BSD-3-Clause
  *
- * Copyright (c) 2022 Tomohiro Kusumi <tkusumi@netbsd.org>
+ * Copyright (c) 2022-2023 Tomohiro Kusumi <tkusumi@netbsd.org>
  * Copyright (c) 2011-2022 The DragonFly Project.  All rights reserved.
  *
  * This code is derived from software contributed to The DragonFly Project
@@ -216,13 +216,14 @@ hammer2_write_dirent(struct uio *uio, ino_t d_fileno, uint8_t d_type,
 static int
 hammer2_readdir(struct vop_readdir_args *ap)
 {
+	struct vnode *vp = ap->a_vp;
+	struct uio *uio = ap->a_uio;
+
 	hammer2_xop_readdir_t *xop;
-	hammer2_inode_t *ip = VTOI(ap->a_vp);
+	hammer2_inode_t *ip = VTOI(vp);
 	const hammer2_inode_data_t *ripdata;
 	hammer2_blockref_t bref;
 	hammer2_tid_t inum;
-	hammer2_key_t lkey;
-	struct uio *uio = ap->a_uio;
 	off_t saveoff = uio->uio_offset;
 	off_t *cookies;
 	int ncookies, r, dtype;
@@ -230,7 +231,7 @@ hammer2_readdir(struct vop_readdir_args *ap)
 	uint16_t namlen;
 	const char *dname;
 
-	if (ap->a_vp->v_type != VDIR)
+	if (vp->v_type != VDIR)
 		return (ENOTDIR);
 
 	/* Setup cookies directory entry cookies if requested. */
@@ -267,6 +268,8 @@ hammer2_readdir(struct vop_readdir_args *ap)
 		if (cookie_index == ncookies)
 			goto done;
 	}
+	if (error)
+		goto done;
 
 	if (saveoff == 1) {
 		inum = ip->meta.inum & HAMMER2_DIRHASH_USERMSK;
@@ -282,14 +285,12 @@ hammer2_readdir(struct vop_readdir_args *ap)
 		if (cookie_index == ncookies)
 			goto done;
 	}
-
-	lkey = saveoff | HAMMER2_DIRHASH_VISIBLE;
 	if (error)
 		goto done;
 
 	/* Use XOP for remaining entries. */
 	xop = hammer2_xop_alloc(ip);
-	xop->lkey = lkey;
+	xop->lkey = saveoff | HAMMER2_DIRHASH_VISIBLE;
 	hammer2_xop_start(&xop->head, &hammer2_readdir_desc);
 
 	for (;;) {
@@ -621,6 +622,7 @@ hammer2_print(struct vop_print_args *ap)
 static int
 hammer2_pathconf(struct vop_pathconf_args *ap)
 {
+	struct vnode *vp = ap->a_vp;
 	int error = 0;
 
 	switch (ap->a_name) {
@@ -631,7 +633,7 @@ hammer2_pathconf(struct vop_pathconf_args *ap)
 		*ap->a_retval = HAMMER2_INODE_MAXNAME;
 		break;
 	case _PC_PIPE_BUF:
-		if (ap->a_vp->v_type == VDIR || ap->a_vp->v_type == VFIFO)
+		if (vp->v_type == VDIR || vp->v_type == VFIFO)
 			*ap->a_retval = PIPE_BUF;
 		else
 			error = EINVAL;
@@ -643,7 +645,7 @@ hammer2_pathconf(struct vop_pathconf_args *ap)
 		*ap->a_retval = 0;
 		break;
 	case _PC_MIN_HOLE_SIZE:
-		*ap->a_retval = ap->a_vp->v_mount->mnt_stat.f_iosize;
+		*ap->a_retval = vp->v_mount->mnt_stat.f_iosize;
 		break;
 	case _PC_PRIO_IO:
 		*ap->a_retval = 0;
@@ -652,22 +654,22 @@ hammer2_pathconf(struct vop_pathconf_args *ap)
 		*ap->a_retval = 0;
 		break;
 	case _PC_ALLOC_SIZE_MIN:
-		*ap->a_retval = ap->a_vp->v_mount->mnt_stat.f_bsize;
+		*ap->a_retval = vp->v_mount->mnt_stat.f_bsize;
 		break;
 	case _PC_FILESIZEBITS:
 		*ap->a_retval = 64;
 		break;
 	case _PC_REC_INCR_XFER_SIZE:
-		*ap->a_retval = ap->a_vp->v_mount->mnt_stat.f_iosize;
+		*ap->a_retval = vp->v_mount->mnt_stat.f_iosize;
 		break;
 	case _PC_REC_MAX_XFER_SIZE:
 		*ap->a_retval = -1;	/* means ``unlimited'' */
 		break;
 	case _PC_REC_MIN_XFER_SIZE:
-		*ap->a_retval = ap->a_vp->v_mount->mnt_stat.f_iosize;
+		*ap->a_retval = vp->v_mount->mnt_stat.f_iosize;
 		break;
 	case _PC_REC_XFER_ALIGN:
-		*ap->a_retval = ap->a_vp->v_mount->mnt_stat.f_bsize;
+		*ap->a_retval = vp->v_mount->mnt_stat.f_bsize;
 		break;
 	case _PC_SYMLINK_MAX:
 		*ap->a_retval = HAMMER2_INODE_MAXNAME;

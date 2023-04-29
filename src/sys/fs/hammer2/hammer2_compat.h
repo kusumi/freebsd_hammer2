@@ -1,7 +1,7 @@
 /*-
  * SPDX-License-Identifier: BSD-3-Clause
  *
- * Copyright (c) 2023 Tomohiro Kusumi <tkusumi@netbsd.org>
+ * Copyright (c) 2022-2023 Tomohiro Kusumi <tkusumi@netbsd.org>
  * Copyright (c) 2011-2022 The DragonFly Project.  All rights reserved.
  *
  * This code is derived from software contributed to The DragonFly Project
@@ -52,5 +52,8 @@
 #endif
 
 #define cpu_ccfence	__compiler_membar
+
+#define kstrdup(s)	strdup(s, M_TEMP)
+#define kstrfree(s)	free(s, M_TEMP)
 
 #endif /* !_FS_HAMMER2_COMPAT_H_ */

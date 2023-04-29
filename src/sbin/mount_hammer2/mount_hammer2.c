@@ -1,7 +1,7 @@
 /*-
  * SPDX-License-Identifier: BSD-3-Clause
  *
- * Copyright (c) 2023 Tomohiro Kusumi <tkusumi@netbsd.org>
+ * Copyright (c) 2022-2023 Tomohiro Kusumi <tkusumi@netbsd.org>
  * Copyright (c) 2011-2023 The DragonFly Project.  All rights reserved.
  * Copyright (c) 1993, 1994
  *	The Regents of the University of California.  All rights reserved.
@@ -31,17 +31,19 @@
  * SUCH DAMAGE.
  */
 
-#include <sys/types.h>
+#include <sys/param.h>
 #include <sys/mount.h>
-#include <fs/hammer2/hammer2_mount.h>
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdarg.h>
 #include <string.h>
 #include <unistd.h>
+#include <errno.h>
 #include <err.h>
 #include <mntopts.h>
+
+#include <fs/hammer2/hammer2_mount.h>
 
 static int mount_hammer2(int argc, char **argv);
 static void usage(const char *ctl, ...);
@@ -114,17 +116,18 @@ mount_hammer2_parseargs(int argc, char **argv,
 		free(tmp);
 	}
 
-	args->volume = canon_dev;
+	args->fspec = canon_dev;
 	args->hflags = HMNT2_LOCAL; /* force local, not optional */
 }
 
-int
+static int
 mount_hammer2(int argc, char **argv)
 {
 	struct hammer2_mount_info args;
 	struct iovec *iov = NULL;
 	char fstype[] = "hammer2";
 	char canon_dev[MAXPATHLEN], canon_dir[MAXPATHLEN];
+	const char *errcause;
 	int mntflags, iovlen = 0;
 
 	mount_hammer2_parseargs(argc, argv, &args, &mntflags, canon_dev,
@@ -132,11 +135,17 @@ mount_hammer2(int argc, char **argv)
 
 	build_iovec(&iov, &iovlen, "fstype", fstype, (size_t)-1);
 	build_iovec(&iov, &iovlen, "fspath", canon_dir, (size_t)-1);
-	build_iovec(&iov, &iovlen, "from", args.volume, (size_t)-1);
+	build_iovec(&iov, &iovlen, "from", args.fspec, (size_t)-1);
 	build_iovec(&iov, &iovlen, "hflags", &args.hflags, sizeof(args.hflags));
 
-	if (nmount(iov, iovlen, mntflags) < 0)
-		err(1, "%s", canon_dev);
+	if (nmount(iov, iovlen, mntflags) == -1) {
+		switch (errno) {
+		default:
+			errcause = strerror(errno);
+			break;
+		}
+		errx(1, "%s on %s: %s", args.fspec, canon_dir, errcause);
+	}
 
 	return (0);
 }

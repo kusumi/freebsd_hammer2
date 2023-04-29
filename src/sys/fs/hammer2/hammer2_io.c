@@ -1,7 +1,7 @@
 /*-
  * SPDX-License-Identifier: BSD-3-Clause
  *
- * Copyright (c) 2022 Tomohiro Kusumi <tkusumi@netbsd.org>
+ * Copyright (c) 2022-2023 Tomohiro Kusumi <tkusumi@netbsd.org>
  * Copyright (c) 2011-2022 The DragonFly Project.  All rights reserved.
  *
  * This code is derived from software contributed to The DragonFly Project
@@ -73,7 +73,7 @@ struct hammer2_cleanupcb_info {
 };
 
 static __inline void
-hammer2_assert_io_refs(const hammer2_io_t *dio)
+hammer2_assert_io_refs(hammer2_io_t *dio)
 {
 	hammer2_mtx_assert_ex(&dio->lock);
 	KKASSERT((dio->refs & HAMMER2_DIO_MASK) != 0);
