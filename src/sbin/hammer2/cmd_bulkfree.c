@@ -2,7 +2,7 @@
  * SPDX-License-Identifier: BSD-3-Clause
  *
  * Copyright (c) 2022-2023 Tomohiro Kusumi <tkusumi@netbsd.org>
- * Copyright (c) 2011-2022 The DragonFly Project.  All rights reserved.
+ * Copyright (c) 2015 The DragonFly Project.  All rights reserved.
  *
  * This code is derived from software contributed to The DragonFly Project
  * by Matthew Dillon <dillon@dragonflybsd.org>
@@ -35,27 +35,36 @@
  * SUCH DAMAGE.
  */
 
-#ifndef _FS_HAMMER2_COMPAT_H_
-#define _FS_HAMMER2_COMPAT_H_
+#include "hammer2.h"
 
-#include <sys/cdefs.h>
-#include <sys/kassert.h>
+int
+cmd_bulkfree(const char *sel_path)
+{
+	hammer2_ioc_bulkfree_t bfi;
+	int ecode = 0;
+	int fd;
+	int res;
+	size_t usermem;
+	size_t usermem_size = sizeof(usermem);
 
-/* KASSERT variant from DragonFly */
-#ifdef INVARIANTS
-#define KKASSERT(exp)	do { if (__predict_false(!(exp)))	  \
-				panic("assertion \"%s\" failed "  \
-				"in %s at %s:%u", #exp, __func__, \
-				__FILE__, __LINE__); } while (0)
-#else
-#define KKASSERT(exp)	do { } while (0)
-#endif
+	bzero(&bfi, sizeof(bfi));
+	usermem = 0;
+	if (sysctlbyname("hw.usermem", &usermem, &usermem_size, NULL, 0) == 0)
+		bfi.size = usermem / 16;
+	else
+		bfi.size = 0;
+	if (bfi.size < 8192 * 1024)
+		bfi.size = 8192 * 1024;
 
-#define cpu_ccfence	__compiler_membar
+	if (MemOpt)
+		bfi.size = (MemOpt + 8192 * 1024 - 1) & ~(8192 * 1024 - 1L);
 
-#define getticks()	(ticks)
-
-#define kstrdup(s)	strdup(s, M_TEMP)
-#define kstrfree(s)	free(s, M_TEMP)
-
-#endif /* !_FS_HAMMER2_COMPAT_H_ */
+	if ((fd = hammer2_ioctl_handle(sel_path)) < 0)
+		return 1;
+	res = ioctl(fd, HAMMER2IOC_BULKFREE_SCAN, &bfi);
+	if (res) {
+		perror("ioctl");
+		ecode = 1;
+	}
+	return ecode;
+}
