@@ -1,8 +1,5 @@
-/*-
- * SPDX-License-Identifier: BSD-3-Clause
- *
- * Copyright (c) 2022-2023 Tomohiro Kusumi <tkusumi@netbsd.org>
- * Copyright (c) 2011-2022 The DragonFly Project.  All rights reserved.
+/*
+ * Copyright (c) 2020 The DragonFly Project.  All rights reserved.
  *
  * This code is derived from software contributed to The DragonFly Project
  * by Matthew Dillon <dillon@dragonflybsd.org>
@@ -35,29 +32,44 @@
  * SUCH DAMAGE.
  */
 
-#ifndef _FS_HAMMER2_COMPAT_H_
-#define _FS_HAMMER2_COMPAT_H_
+#include "hammer2.h"
 
-#include <sys/cdefs.h>
-#include <sys/kassert.h>
+int
+cmd_growfs(const char *sel_path, int ac, const char **av)
+{
+	int fd;
+	int i;
+	int ecode = 0;
 
-/* KASSERT variant from DragonFly */
-#ifdef INVARIANTS
-#define KKASSERT(exp)	do { if (__predict_false(!(exp)))	  \
-				panic("assertion \"%s\" failed "  \
-				"in %s at %s:%u", #exp, __func__, \
-				__FILE__, __LINE__); } while (0)
-#else
-#define KKASSERT(exp)	do { } while (0)
-#endif
+	/*
+	 * Use sel_path if no arguments, else used passed arguments
+	 */
+	for (i = 0; i <= ac; ++i) {
+		struct hammer2_ioc_growfs growfs;
 
-#define cpu_ccfence	__compiler_membar
+		if (i < ac)
+			sel_path = av[i];
+		else if (i == ac && ac != 0)
+			continue;
 
-#define cpu_pause	cpu_spinwait
-
-#define getticks()	(ticks)
-
-#define kstrdup(s)	strdup(s, M_TEMP)
-#define kstrfree(s)	free(s, M_TEMP)
-
-#endif /* !_FS_HAMMER2_COMPAT_H_ */
+		fd = hammer2_ioctl_handle(sel_path);
+		if (fd < 0) {
+			ecode = 1;
+			continue;
+		}
+		bzero(&growfs, sizeof(growfs));
+		if (ioctl(fd, HAMMER2IOC_GROWFS, &growfs) < 0) {
+			fprintf(stderr, "grow %s failed: %s\n",
+			       sel_path, strerror(errno));
+			ecode = 1;
+		} else if (growfs.modified) {
+			printf("%s grown to %016jx\n",
+			       sel_path, (intmax_t)growfs.size);
+		} else {
+			printf("%s no size change - %016jx\n",
+			       sel_path, (intmax_t)growfs.size);
+		}
+		close(fd);
+	}
+	return ecode;
+}

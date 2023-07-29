@@ -110,6 +110,7 @@ hammer2_open_devvp(struct mount *mp, const hammer2_devvp_list_t *devvpl)
 	struct bufobj *bo;
 	struct g_consumer *cp;
 	int lblksize, error;
+	int ronly = (mp->mnt_flag & MNT_RDONLY) != 0;
 
 	TAILQ_FOREACH(e, devvpl, entry) {
 		devvp = e->devvp;
@@ -118,7 +119,7 @@ hammer2_open_devvp(struct mount *mp, const hammer2_devvp_list_t *devvpl)
 		/* XXX: use VOP_ACESS to check FS perms */
 		vn_lock(devvp, LK_EXCLUSIVE | LK_RETRY);
 		g_topology_lock();
-		error = g_vfs_open(devvp, &cp, "hammer2", 0);
+		error = g_vfs_open(devvp, &cp, "hammer2", ronly ? 0 : 1);
 		g_topology_unlock();
 		VOP_UNLOCK(devvp);
 		if (error)
@@ -740,6 +741,8 @@ hammer2_get_volume(hammer2_dev_t *hmp, hammer2_off_t offset)
 
 	offset &= ~HAMMER2_OFF_MASK_RADIX;
 
+	/* locking is unneeded until volume-add support */
+	//hammer2_voldata_lock(hmp);
 	/* Do binary search if users really use this many supported volumes. */
 	for (i = 0; i < hmp->nvolumes; ++i) {
 		vol = &hmp->volumes[i];
@@ -749,6 +752,7 @@ hammer2_get_volume(hammer2_dev_t *hmp, hammer2_off_t offset)
 			break;
 		}
 	}
+	//hammer2_voldata_unlock(hmp);
 
 	if (!ret)
 		hpanic("no volume for offset %016jx", (intmax_t)offset);

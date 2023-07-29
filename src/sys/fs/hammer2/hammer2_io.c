@@ -192,6 +192,7 @@ hammer2_io_getblk(hammer2_dev_t *hmp, int btype, off_t lbase, int lsize, int op)
 	} else {
 		error = bread(dio->devvp, lblkno, dio->psize, NOCRED, &dio->bp);
 	}
+	KKASSERT(error == 0 || dio->bp == NULL);
 
 	if (dio->bp)
 		BUF_KERNPROC(dio->bp);
@@ -372,6 +373,11 @@ hammer2_io_bread(hammer2_dev_t *hmp, int btype, off_t lbase, int lsize,
 {
 	*diop = hammer2_io_getblk(hmp, btype, lbase, lsize, HAMMER2_DOP_READ);
 	return ((*diop)->error);
+}
+
+void
+hammer2_io_setdirty(hammer2_io_t *dio)
+{
 }
 
 void

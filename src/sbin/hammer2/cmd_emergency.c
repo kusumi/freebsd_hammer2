@@ -1,8 +1,5 @@
-/*-
- * SPDX-License-Identifier: BSD-3-Clause
- *
- * Copyright (c) 2022-2023 Tomohiro Kusumi <tkusumi@netbsd.org>
- * Copyright (c) 2011-2022 The DragonFly Project.  All rights reserved.
+/*
+ * Copyright (c) 2019 The DragonFly Project.  All rights reserved.
  *
  * This code is derived from software contributed to The DragonFly Project
  * by Matthew Dillon <dillon@dragonflybsd.org>
@@ -35,29 +32,33 @@
  * SUCH DAMAGE.
  */
 
-#ifndef _FS_HAMMER2_COMPAT_H_
-#define _FS_HAMMER2_COMPAT_H_
+#include "hammer2.h"
 
-#include <sys/cdefs.h>
-#include <sys/kassert.h>
+int cmd_emergency_mode(const char *sel_path __unused, int enable,
+		       int ac, const char **av)
+{
+	int error = 0;
+	int fd;
 
-/* KASSERT variant from DragonFly */
-#ifdef INVARIANTS
-#define KKASSERT(exp)	do { if (__predict_false(!(exp)))	  \
-				panic("assertion \"%s\" failed "  \
-				"in %s at %s:%u", #exp, __func__, \
-				__FILE__, __LINE__); } while (0)
-#else
-#define KKASSERT(exp)	do { } while (0)
-#endif
+	if (ac != 1) {
+		fprintf(stderr, "Expected <filesystem> argument\n");
+		return 1;
+	}
+	fd = open(av[0], O_RDONLY);
+	if (fd < 0) {
+		fprintf(stderr, "Unable to find \"%s\"\n", av[0]);
+		return 1;
+	}
+	if (ioctl(fd, HAMMER2IOC_EMERG_MODE, &enable) == 0) {
+		if (enable)
+			printf("Emergency mode on \"%s\" enabled\n", av[0]);
+		else
+			printf("Emergency mode on \"%s\" disabled\n", av[0]);
+	} else {
+		printf("Cannot change emerg mode: %s\n", strerror(errno));
+		error = 1;
+	}
+	close(fd);
 
-#define cpu_ccfence	__compiler_membar
-
-#define cpu_pause	cpu_spinwait
-
-#define getticks()	(ticks)
-
-#define kstrdup(s)	strdup(s, M_TEMP)
-#define kstrfree(s)	free(s, M_TEMP)
-
-#endif /* !_FS_HAMMER2_COMPAT_H_ */
+	return error;
+}
