@@ -522,7 +522,7 @@ hammer2_mount(struct mount *mp)
 		return (0);
 
 	bcopy(fspec, devstr, MNAMELEN - 1);
-	debug_hprintf("devstr=\"%s\" mntpt=\"%s\"\n", devstr, mntpt);
+	debug_hprintf("devstr \"%s\" mntpt \"%s\"\n", devstr, mntpt);
 
 	/*
 	 * Extract device and label, automatically mount @DATA if no label
@@ -547,7 +547,7 @@ hammer2_mount(struct mount *mp)
 		label++;
 	}
 
-	debug_hprintf("device=\"%s\" label=\"%s\" rdonly=%d\n",
+	debug_hprintf("device \"%s\" label \"%s\" rdonly %d\n",
 	    devstr, label, (mp->mnt_flag & MNT_RDONLY) != 0);
 
 	/* Initialize all device vnodes. */
@@ -586,7 +586,7 @@ hammer2_mount(struct mount *mp)
 					goto next_hmp;
 			}
 			hmp = hmp_tmp;
-			debug_hprintf("hmp=%p matched\n", hmp);
+			debug_hprintf("hmp %p matched\n", hmp);
 			break;
 next_hmp:
 			continue;
@@ -883,7 +883,7 @@ next_hmp:
 	}
 
 	/* Finish the mount. */
-	debug_hprintf("hmp=%p pmp=%p\n", hmp, pmp);
+	debug_hprintf("hmp %p pmp %p\n", hmp, pmp);
 
 	if (pmp->mp) {
 		hprintf("PFS already mounted!\n");
@@ -1130,6 +1130,9 @@ again:
 
 	lockdestroy(&hmp->vollk);
 	lockdestroy(&hmp->bflk);
+
+	hammer2_print_iostat(&hmp->iostat_read, "read");
+	hammer2_print_iostat(&hmp->iostat_write, "write");
 
 	free(hmp, M_HAMMER2);
 }

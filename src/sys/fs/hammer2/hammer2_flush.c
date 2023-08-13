@@ -296,8 +296,7 @@ hammer2_flush(hammer2_chain_t *chain, int flags)
 		 * additional modifications.
 		 */
 		if (info.parent != chain->parent) {
-			hprintf("LOST CHILD4 %p->%p (actual parent %p)\n",
-			    info.parent, chain, chain->parent);
+			hprintf("lost child4\n");
 			hammer2_chain_drop(info.parent);
 			info.parent = chain->parent;
 			hammer2_chain_ref(info.parent);
@@ -306,7 +305,7 @@ hammer2_flush(hammer2_chain_t *chain, int flags)
 			break;
 
 		if (++loops % 1000 == 0)
-			hprintf("excessive loops on %p\n", chain);
+			hprintf("excessive loops\n");
 	}
 #ifdef HAMMER2_SCAN_DEBUG
 	if (info.scan_count >= 10)
@@ -390,7 +389,7 @@ hammer2_flush_core(hammer2_flush_info_t *info, hammer2_chain_t *chain,
 	 * Nothing to do if none of these flags are set.
 	 */
 	if ((chain->flags & HAMMER2_CHAIN_FLUSH_MASK) == 0)
-		return 0;
+		return (0);
 
 	/* NOTE: parent can be NULL, usually due to destroy races. */
 	parent = info->parent;
@@ -450,7 +449,7 @@ hammer2_flush_core(hammer2_flush_info_t *info, hammer2_chain_t *chain,
 		goto done;
 	} else if (info->depth == HAMMER2_FLUSH_DEPTH_LIMIT) {
 		/* Recursion depth reached. */
-		panic("flush depth limit");
+		hpanic("flush depth limit");
 	} else if (chain->flags &
 	    (HAMMER2_CHAIN_ONFLUSH | HAMMER2_CHAIN_DESTROY)) {
 		/*
@@ -503,8 +502,7 @@ hammer2_flush_core(hammer2_flush_info_t *info, hammer2_chain_t *chain,
 		 * by the ONFLUSH flag elsewhere.
 		 */
 		if (chain->parent != parent) {
-			hprintf("LOST CHILD2 %p->%p (actual parent %p)\n",
-			    parent, chain, chain->parent);
+			hprintf("lost child2\n");
 			goto done;
 		}
 	}
@@ -546,8 +544,7 @@ hammer2_flush_core(hammer2_flush_info_t *info, hammer2_chain_t *chain,
 	}
 
 	if (chain->parent != parent) {
-		hprintf("LOST CHILD3 %p->%p (actual parent %p)\n",
-		    parent, chain, chain->parent);
+		hprintf("lost child3\n");
 		KKASSERT(parent != NULL);
 		hammer2_chain_unlock(parent);
 		retry = 1;
@@ -587,7 +584,7 @@ hammer2_flush_core(hammer2_flush_info_t *info, hammer2_chain_t *chain,
 		 *	 further modifications to the buffer.  Chains with
 		 *	 embedded data don't need this.
 		 */
-		debug_hprintf("flush %p.%d %016jx/%d data=%016jx\n",
+		debug_hprintf("flush %p.%d %016jx/%d %016jx\n",
 		    chain, chain->bref.type, (uintmax_t)chain->bref.key,
 		    chain->bref.keybits, (uintmax_t)chain->bref.data_off);
 
@@ -733,9 +730,8 @@ hammer2_flush_core(hammer2_flush_info_t *info, hammer2_chain_t *chain,
 			hammer2_chain_setcheck(chain, chain->data);
 			break;
 		default:
-			panic("unsupported embedded blockref type %d",
-			    chain->bref.type);
-			/* NOT REACHED */
+			hpanic("bad blockref type %d", chain->bref.type);
+			break;
 		}
 
 		/*
@@ -853,7 +849,7 @@ hammer2_flush_core(hammer2_flush_info_t *info, hammer2_chain_t *chain,
 		save_error = hammer2_chain_modify(parent, 0, 0, 0);
 		if (save_error) {
 			info->error |= save_error;
-			hprintf("%016jx.%02x error=%08x\n",
+			hprintf("%016jx.%02x error %08x\n",
 			    parent->bref.data_off, parent->bref.type,
 			    save_error);
 			atomic_set_int(&chain->flags, HAMMER2_CHAIN_UPDATE);
@@ -894,10 +890,7 @@ hammer2_flush_core(hammer2_flush_info_t *info, hammer2_chain_t *chain,
 			count = HAMMER2_SET_COUNT;
 			break;
 		default:
-			base = NULL;
-			count = 0;
-			panic("unrecognized blockref type %d",
-			    parent->bref.type);
+			hpanic("bad blockref type %d", parent->bref.type);
 			break;
 		}
 
@@ -986,13 +979,11 @@ hammer2_flush_recurse(hammer2_chain_t *child, void *data)
 	hammer2_chain_unlock(parent);
 	hammer2_chain_lock(child, HAMMER2_RESOLVE_MAYBE);
 	if (child->parent != parent) {
-		hprintf("LOST CHILD1 %p->%p (actual parent %p)\n",
-		    parent, child, child->parent);
+		hprintf("lost child1\n");
 		goto done;
 	}
 	if (child->error) {
-		hprintf("CHILD ERROR DURING FLUSH LOCK %p->%p\n",
-		    parent, child);
+		hprintf("child error %d during flush lock\n", child->error);
 		info->error |= child->error;
 		goto done;
 	}
@@ -1050,8 +1041,7 @@ done:
 	hammer2_chain_lock(parent, HAMMER2_RESOLVE_MAYBE);
 	hammer2_chain_drop_unhold(parent);
 	if (parent->error) {
-		hprintf("PARENT ERROR DURING FLUSH LOCK %p->%p\n",
-		    parent, child);
+		hprintf("parent error %d during flush lock\n", parent->error);
 		info->error |= parent->error;
 	}
 	hammer2_chain_drop(child);
@@ -1230,7 +1220,8 @@ hammer2_xop_inode_flush(hammer2_xop_t *arg, int clindex)
 		fsync_error = VOP_FSYNC(devvp, MNT_WAIT, 0);
 		VOP_UNLOCK(devvp);
 		if (fsync_error || flush_error)
-			hprintf("sync error fsync=%d h2flush=0x%04x dev=%s\n",
+			hprintf("fsync_error %d flush_error 0x%04x "
+			    "device \"%s\"\n",
 			    fsync_error, flush_error, e->path);
 	}
 

@@ -51,9 +51,26 @@
 #define KKASSERT(exp)	do { } while (0)
 #endif
 
-#define cpu_ccfence	__compiler_membar
+/* XXX Not atomic, but mostly harmless with read-only support. */
+#ifndef atomic_set_64
+static __inline void
+atomic_set_64(volatile uint64_t *p, uint64_t v)
+{
+	*p |= v;
+}
+#endif
+
+#ifndef atomic_clear_64
+static __inline void
+atomic_clear_64(volatile uint64_t *p, uint64_t v)
+{
+	*p &= ~v;
+}
+#endif
 
 #define cpu_pause	cpu_spinwait
+
+#define cpu_ccfence	__compiler_membar
 
 #define getticks()	(ticks)
 
