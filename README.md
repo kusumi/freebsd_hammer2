@@ -5,8 +5,6 @@ FreeBSD [HAMMER2](https://gitweb.dragonflybsd.org/dragonfly.git/blob/HEAD:/sys/v
 
 + HAMMER2 file system for FreeBSD (currently read-only support)
 
-+ FreeBSD version of https://github.com/kusumi/openbsd_hammer2
-
 ## Requirements
 
 + Recent FreeBSD
@@ -39,6 +37,10 @@ FreeBSD [HAMMER2](https://gitweb.dragonflybsd.org/dragonfly.git/blob/HEAD:/sys/v
 ## Ports
 
 + https://www.freshports.org/sysutils/hammer2
+
+## Bugs
+
++ VOP_READDIR implementation is known to not work with some user space libraries on 32 bit platforms.
 
 ## Notes
 

@@ -36,22 +36,14 @@
  * SUCH DAMAGE.
  */
 
-#include <sys/param.h>
-#include <sys/systm.h>
-#include <sys/buf.h>
+#include "hammer2.h"
+
 #include <sys/fcntl.h>
-#include <sys/malloc.h>
-#include <sys/mount.h>
 #include <sys/namei.h>
 #include <sys/priv.h>
-#include <sys/queue.h>
-#include <sys/uuid.h>
-#include <sys/vnode.h>
 
 #include <geom/geom.h>
 #include <geom/geom_vfs.h>
-
-#include "hammer2.h"
 
 static int
 hammer2_lookup_device(const struct mount *mp, const char *path,

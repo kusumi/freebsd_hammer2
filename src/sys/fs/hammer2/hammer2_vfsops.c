@@ -35,20 +35,10 @@
  * SUCH DAMAGE.
  */
 
-#include <sys/param.h>
-#include <sys/systm.h>
-#include <sys/lock.h>
-#include <sys/malloc.h>
-#include <sys/mount.h>
-#include <sys/queue.h>
-#include <sys/sysctl.h>
-#include <sys/tree.h>
-#include <sys/vnode.h>
-
-#include <vm/uma.h>
-
 #include "hammer2.h"
 #include "hammer2_mount.h"
+
+#include <sys/sysctl.h>
 
 static int hammer2_unmount(struct mount *, int);
 static int hammer2_statfs(struct mount *, struct statfs *);
@@ -219,7 +209,7 @@ hammer2_pfsalloc(hammer2_chain_t *chain, const hammer2_inode_data_t *ripdata,
 {
 	hammer2_pfs_t *pmp = NULL;
 	hammer2_inode_t *iroot;
-	int j;
+	int i, j;
 
 	KASSERT(force_local, ("only local mount allowed"));
 
@@ -251,7 +241,8 @@ hammer2_pfsalloc(hammer2_chain_t *chain, const hammer2_inode_data_t *ripdata,
 		hammer2_spin_init(&pmp->inum_spin, "h2pmp_inosp");
 		hammer2_spin_init(&pmp->lru_spin, "h2pmp_lrusp");
 		hammer2_spin_init(&pmp->list_spin, "h2pmp_lssp");
-		hammer2_mtx_init(&pmp->xop_lock, "h2pmp_xoplk");
+		for (i = 0; i < HAMMER2_IHASH_SIZE; i++)
+			hammer2_mtx_init(&pmp->xop_lock[i], "h2pmp_xoplk");
 		hammer2_mtx_init(&pmp->trans_lock, "h2pmp_trlk");
 		RB_INIT(&pmp->inum_tree);
 		TAILQ_INIT(&pmp->lru_list);
@@ -384,7 +375,8 @@ hammer2_pfsfree(hammer2_pfs_t *pmp)
 		hammer2_spin_destroy(&pmp->inum_spin);
 		hammer2_spin_destroy(&pmp->lru_spin);
 		hammer2_spin_destroy(&pmp->list_spin);
-		hammer2_mtx_destroy(&pmp->xop_lock);
+		for (i = 0; i < HAMMER2_IHASH_SIZE; i++)
+			hammer2_mtx_destroy(&pmp->xop_lock[i]);
 		hammer2_mtx_destroy(&pmp->trans_lock);
 		hashdestroy(pmp->ipdep_lists, M_HAMMER2, pmp->ipdep_mask);
 		free(pmp, M_HAMMER2);

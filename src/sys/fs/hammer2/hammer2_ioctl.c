@@ -35,15 +35,11 @@
  * SUCH DAMAGE.
  */
 
-#include <sys/param.h>
-#include <sys/systm.h>
-#include <sys/buf.h>
-
-#include <geom/geom.h>
-
 #include "hammer2.h"
 #include "hammer2_ioctl.h"
 #include "hammer2_mount.h"
+
+#include <geom/geom.h>
 
 /*
  * Return 1 if read-only mounted otherwise 0.  DragonFly allows bwrite(9)
