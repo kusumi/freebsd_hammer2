@@ -223,7 +223,8 @@ hammer2_xop_strategy_read(hammer2_xop_t *arg, int clindex)
 		bufdone(bp);
 		break;
 	default:
-		hprintf("error %08x at b_offset %016jx\n", error, bp->b_offset);
+		hprintf("error %08x at b_offset %016jx\n",
+		    error, (intmax_t)bp->b_offset);
 		bp->b_error = EIO;
 		bp->b_ioflags |= BIO_ERROR;
 		bufdone(bp);
@@ -380,8 +381,6 @@ hammer2_dedup_record(hammer2_chain_t *chain, hammer2_io_t *dio,
 	}
 
 	dedup += best;
-	//debug_hprintf("REC %04x %016jx %016jx\n",
-	//    (int)(dedup - hmp->heur_dedup), crc, chain->bref.data_off);
 	dedup->ticks = getticks();
 	dedup->data_off = chain->bref.data_off;
 	dedup->data_crc = crc;

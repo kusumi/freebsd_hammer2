@@ -72,6 +72,14 @@ hammer2_reclaim(struct vop_reclaim_args *ap)
 	return (0);
 }
 
+#if 0
+static int
+hammer2_fsync(struct vop_fsync_args *ap)
+{
+	return (EOPNOTSUPP);
+}
+#endif
+
 static int
 hammer2_access(struct vop_access_args *ap)
 {
@@ -90,8 +98,8 @@ hammer2_access(struct vop_access_args *ap)
 		case VDIR:
 		case VLNK:
 		case VREG:
-			return (EROFS);
-			/* NOT REACHED */
+			if (vp->v_mount->mnt_flag & MNT_RDONLY)
+				return (EROFS);
 		default:
 			break;
 		}
@@ -154,14 +162,16 @@ hammer2_setattr(struct vop_setattr_args *ap)
 	    || vap->va_blocksize != (long)VNOVAL
 	    || vap->va_rdev != (dev_t)VNOVAL
 	    || vap->va_bytes != (u_quad_t)VNOVAL
-	    || vap->va_gen != (u_long)VNOVAL
-	    || vap->va_flags != (u_long)VNOVAL
+	    || vap->va_gen != (u_long)VNOVAL)
+		return (EINVAL);
+
+	if (vap->va_flags != (u_long)VNOVAL
 	    || vap->va_uid != (uid_t)VNOVAL
 	    || vap->va_gid != (gid_t)VNOVAL
 	    || vap->va_atime.tv_sec != (time_t)VNOVAL
 	    || vap->va_mtime.tv_sec != (time_t)VNOVAL
 	    || vap->va_mode != (mode_t)VNOVAL)
-		return (EROFS);
+		return (EOPNOTSUPP);
 
 	if (vap->va_size != (u_quad_t)VNOVAL) {
 		switch (vp->v_type) {
@@ -169,7 +179,9 @@ hammer2_setattr(struct vop_setattr_args *ap)
 			return (EISDIR);
 		case VLNK:
 		case VREG:
-			return (EROFS);
+			if (vp->v_mount->mnt_flag & MNT_RDONLY)
+				return (EROFS);
+			return (0); /* implicit-fallthrough */
 		case VCHR:
 		case VBLK:
 		case VSOCK:
@@ -452,6 +464,14 @@ hammer2_read(struct vop_read_args *ap)
 	return (hammer2_read_file(ip, ap->a_uio, ap->a_ioflag));
 }
 
+#if 0
+static int
+hammer2_write(struct vop_write_args *ap)
+{
+	return (EOPNOTSUPP);
+}
+#endif
+
 static int
 hammer2_bmap(struct vop_bmap_args *ap)
 {
@@ -579,6 +599,56 @@ hammer2_nresolve(struct vop_cachedlookup_args *ap)
 	return (error);
 }
 
+#if 0
+static int
+hammer2_mknod(struct vop_mknod_args *ap)
+{
+	return (EOPNOTSUPP);
+}
+
+static int
+hammer2_mkdir(struct vop_mkdir_args *ap)
+{
+	return (EOPNOTSUPP);
+}
+
+static int
+hammer2_create(struct vop_create_args *ap)
+{
+	return (EOPNOTSUPP);
+}
+
+static int
+hammer2_rmdir(struct vop_rmdir_args *ap)
+{
+	return (EOPNOTSUPP);
+}
+
+static int
+hammer2_remove(struct vop_remove_args *ap)
+{
+	return (EOPNOTSUPP);
+}
+
+static int
+hammer2_rename(struct vop_rename_args *ap)
+{
+	return (EOPNOTSUPP);
+}
+
+static int
+hammer2_link(struct vop_link_args *ap)
+{
+	return (EOPNOTSUPP);
+}
+
+static int
+hammer2_symlink(struct vop_symlink_args *ap)
+{
+	return (EOPNOTSUPP);
+}
+#endif
+
 static int
 hammer2_open(struct vop_open_args *ap)
 {
@@ -591,6 +661,34 @@ hammer2_open(struct vop_open_args *ap)
 	vnode_create_vobject(vp, ip->meta.size, ap->a_td);
 
 	return (0);
+}
+
+static int
+hammer2_close(struct vop_close_args *ap)
+{
+#if 0
+	struct vnode *vp = ap->a_vp;
+
+	VI_LOCK(vp);
+	if (vp->v_usecount > 1)
+		hammer2_itimes(vp);
+	VI_UNLOCK(vp);
+#endif
+	return (0);
+}
+
+static int
+hammer2fifo_close(struct vop_close_args *ap)
+{
+#if 0
+	struct vnode *vp = ap->a_vp;
+
+	VI_LOCK(vp);
+	if (vp->v_usecount > 1)
+		hammer2_itimes(vp);
+	VI_UNLOCK(vp);
+#endif
+	return (fifo_specops.vop_close(ap));
 }
 
 static int
@@ -742,16 +840,28 @@ struct vop_vector hammer2_vnodeops = {
 	.vop_default		= &default_vnodeops,
 	.vop_inactive		= hammer2_inactive,
 	.vop_reclaim		= hammer2_reclaim,
+	.vop_fsync		= VOP_EOPNOTSUPP,
+	//.vop_fdatasync	= vop_stdfdatasync_buf,
 	.vop_access		= hammer2_access,
 	.vop_getattr		= hammer2_getattr,
 	.vop_setattr		= hammer2_setattr,
 	.vop_readdir		= hammer2_readdir,
 	.vop_readlink		= hammer2_readlink,
 	.vop_read		= hammer2_read,
+	.vop_write		= VOP_EOPNOTSUPP,
 	.vop_bmap		= hammer2_bmap,
 	.vop_cachedlookup	= hammer2_nresolve,
 	.vop_lookup		= vfs_cache_lookup,
+	.vop_mknod		= VOP_EOPNOTSUPP,
+	.vop_mkdir		= VOP_EOPNOTSUPP,
+	.vop_create		= VOP_EOPNOTSUPP,
+	.vop_rmdir		= VOP_EOPNOTSUPP,
+	.vop_remove		= VOP_EOPNOTSUPP,
+	.vop_rename		= VOP_EOPNOTSUPP,
+	.vop_link		= VOP_EOPNOTSUPP,
+	.vop_symlink		= VOP_EOPNOTSUPP,
 	.vop_open		= hammer2_open,
+	.vop_close		= hammer2_close,
 	.vop_ioctl		= hammer2_ioctl,
 	.vop_print		= hammer2_print,
 	.vop_pathconf		= hammer2_pathconf,
@@ -765,9 +875,13 @@ struct vop_vector hammer2_fifoops = {
 	.vop_default		= &fifo_specops,
 	.vop_inactive		= hammer2_inactive,
 	.vop_reclaim		= hammer2_reclaim,
+	.vop_fsync		= VOP_EOPNOTSUPP,
 	.vop_access		= hammer2_access,
 	.vop_getattr		= hammer2_getattr,
 	.vop_setattr		= hammer2_setattr,
+	.vop_read		= VOP_PANIC,
+	.vop_write		= VOP_PANIC,
+	.vop_close		= hammer2fifo_close,
 	.vop_print		= hammer2_print,
 	.vop_pathconf		= hammer2_pathconf,
 	.vop_vptofh		= hammer2_vptofh,
