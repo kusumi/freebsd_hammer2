@@ -172,7 +172,7 @@ hammer2_inode_delayed_sideq(hammer2_inode_t *ip)
 	if ((ip->flags & (HAMMER2_INODE_SYNCQ | HAMMER2_INODE_SIDEQ)) == 0) {
 		hammer2_spin_ex(&pmp->list_spin);
 		KKASSERT(ip->vp);
-		vref(ip->vp); /* XXX sync */
+		vhold(ip->vp); /* XXX sync */
 		hammer2_inode_setdepend_locked(ip, NULL);
 		hammer2_spin_unex(&pmp->list_spin);
 	}

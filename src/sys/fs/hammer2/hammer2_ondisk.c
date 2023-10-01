@@ -102,7 +102,7 @@ hammer2_open_devvp(struct mount *mp, const hammer2_devvp_list_t *devvpl)
 	struct bufobj *bo;
 	struct g_consumer *cp;
 	int lblksize, error;
-	int ronly = (mp->mnt_flag & MNT_RDONLY) != 0;
+	int rdonly = (mp->mnt_flag & MNT_RDONLY) != 0;
 
 	TAILQ_FOREACH(e, devvpl, entry) {
 		devvp = e->devvp;
@@ -111,7 +111,7 @@ hammer2_open_devvp(struct mount *mp, const hammer2_devvp_list_t *devvpl)
 		/* XXX: use VOP_ACESS to check FS perms */
 		vn_lock(devvp, LK_EXCLUSIVE | LK_RETRY);
 		g_topology_lock();
-		error = g_vfs_open(devvp, &cp, "hammer2", ronly ? 0 : 1);
+		error = g_vfs_open(devvp, &cp, "hammer2", rdonly ? 0 : 1);
 		g_topology_unlock();
 		VOP_UNLOCK(devvp);
 		if (error)
@@ -755,4 +755,48 @@ hammer2_get_volume(hammer2_dev_t *hmp, hammer2_off_t offset)
 	KKASSERT(ret->dev->path);
 
 	return (ret);
+}
+
+int
+hammer2_access_devvp(struct vnode *devvp, int rdonly)
+{
+	struct thread *td = curthread;
+	accmode_t accmode = rdonly ? VREAD : VREAD|VWRITE;
+	int error;
+
+	vn_lock(devvp, LK_EXCLUSIVE | LK_RETRY);
+	error = VOP_ACCESS(devvp, accmode, td->td_ucred, td);
+	if (error)
+		error = priv_check(td, PRIV_VFS_MOUNT_PERM);
+	VOP_UNLOCK(devvp);
+
+	return (error);
+}
+
+static int
+hammer2_gaccess_devvp(struct vnode *devvp, int dcr, int dcw, int dce)
+{
+	struct g_consumer *cp;
+	int error;
+
+	cp = devvp->v_bufobj.bo_private;
+	KKASSERT(cp);
+
+	g_topology_lock();
+	error = g_access(cp, dcr, dcw, dce);
+	g_topology_unlock();
+
+	return (error);
+}
+
+int
+hammer2_getw_devvp(struct vnode *devvp)
+{
+	return (hammer2_gaccess_devvp(devvp, 0, 1, 0));
+}
+
+int
+hammer2_putw_devvp(struct vnode *devvp)
+{
+	return (hammer2_gaccess_devvp(devvp, 0, -1, 0));
 }

@@ -45,7 +45,6 @@
 
 #include <fs/hammer2/hammer2_mount.h>
 
-static int mount_hammer2(int argc, char **argv);
 static void usage(const char *ctl, ...);
 
 static struct mntopt mopts[] = {
@@ -57,25 +56,30 @@ static struct mntopt mopts[] = {
 int
 main(int argc, char **argv)
 {
+	struct hammer2_mount_info args;
+	struct iovec *iov = NULL;
+	char fstype[] = "hammer2";
+	char canon_dev[MAXPATHLEN], canon_dir[MAXPATHLEN];
+	const char *errcause;
+	char *val, *p;
+	int ch, mntflags, iovlen = 0;
+
 	setprogname(argv[0]);
-	return mount_hammer2(argc, argv);
-}
 
-static void
-mount_hammer2_parseargs(int argc, char **argv,
-	struct hammer2_mount_info *args, int *mntflags,
-	char *canon_dev, char *canon_dir)
-{
-	char *tmp;
-	int ch;
-
-	memset(args, 0, sizeof(*args));
-	*mntflags = 0;
+	memset(&args, 0, sizeof(args));
+	mntflags = 0;
 	optind = optreset = 1; /* Reset for parse of new argv. */
 	while ((ch = getopt(argc, argv, "o:")) != -1) {
 		switch (ch) {
 		case 'o':
-			getmntopts(optarg, mopts, mntflags, &args->hflags);
+			getmntopts(optarg, mopts, &mntflags, &args.hflags);
+			p = strchr(optarg, '=');
+			val = NULL;
+			if (p != NULL) {
+				*p = '\0';
+				val = p + 1;
+			}
+			build_iovec(&iov, &iovlen, optarg, val, (size_t)-1);
 			break;
 		case '?':
 		default:
@@ -101,37 +105,23 @@ mount_hammer2_parseargs(int argc, char **argv,
 
 	/* Automatically add @DATA if no label specified. */
 	if (strchr(canon_dev, '@') == NULL) {
-		if (asprintf(&tmp, "%s@DATA", canon_dev) == -1)
+		if (asprintf(&val, "%s@DATA", canon_dev) == -1)
 			err(1, "asprintf");
-		strlcpy(canon_dev, tmp, MAXPATHLEN);
-		free(tmp);
+		strlcpy(canon_dev, val, MAXPATHLEN);
+		free(val);
 	}
 
 	/* Prefix if necessary. */
 	if (!strchr(canon_dev, ':') && canon_dev[0] != '/' &&
 	    canon_dev[0] != '@') {
-		if (asprintf(&tmp, "/dev/%s", canon_dev) == -1)
+		if (asprintf(&val, "/dev/%s", canon_dev) == -1)
 			err(1, "asprintf");
-		strlcpy(canon_dev, tmp, MAXPATHLEN);
-		free(tmp);
+		strlcpy(canon_dev, val, MAXPATHLEN);
+		free(val);
 	}
 
-	args->fspec = canon_dev;
-	args->hflags = HMNT2_LOCAL; /* force local, not optional */
-}
-
-static int
-mount_hammer2(int argc, char **argv)
-{
-	struct hammer2_mount_info args;
-	struct iovec *iov = NULL;
-	char fstype[] = "hammer2";
-	char canon_dev[MAXPATHLEN], canon_dir[MAXPATHLEN];
-	const char *errcause;
-	int mntflags, iovlen = 0;
-
-	mount_hammer2_parseargs(argc, argv, &args, &mntflags, canon_dev,
-	    canon_dir);
+	args.fspec = canon_dev;
+	args.hflags = HMNT2_LOCAL; /* force local, not optional */
 
 	build_iovec(&iov, &iovlen, "fstype", fstype, (size_t)-1);
 	build_iovec(&iov, &iovlen, "fspath", canon_dir, (size_t)-1);
