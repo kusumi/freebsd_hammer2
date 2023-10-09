@@ -64,7 +64,7 @@ static hammer2_mntlist_t hammer2_mntlist;
 hammer2_pfslist_t hammer2_pfslist;
 static hammer2_pfslist_t hammer2_spmplist;
 
-struct lock hammer2_mntlk;
+hammer2_lk_t hammer2_mntlk;
 
 static int hammer2_supported_version = HAMMER2_VOL_VERSION_DEFAULT;
 int hammer2_cluster_meta_read = 1; /* for physical read-ahead */
@@ -152,7 +152,7 @@ hammer2_init(struct vfsconf *vfsp)
 	    NULL, NULL, NULL, NULL, UMA_ALIGN_PTR, 0);
 	KKASSERT(hammer2_rbuf_zone);
 
-	lockinit(&hammer2_mntlk, PVFS, "mntlk", 0, 0);
+	hammer2_lk_init(&hammer2_mntlk, "h2mntlk");
 
 	TAILQ_INIT(&hammer2_mntlist);
 	TAILQ_INIT(&hammer2_pfslist);
@@ -178,7 +178,7 @@ hammer2_init(struct vfsconf *vfsp)
 static int
 hammer2_uninit(struct vfsconf *vfsp)
 {
-	lockdestroy(&hammer2_mntlk);
+	hammer2_lk_destroy(&hammer2_mntlk);
 
 	if (hammer2_inode_zone) {
 		uma_zdestroy(hammer2_inode_zone);
@@ -206,15 +206,13 @@ hammer2_uninit(struct vfsconf *vfsp)
  * Core PFS allocator.  Used to allocate or reference the pmp structure
  * for PFS cluster mounts and the spmp structure for media (hmp) structures.
  */
-static hammer2_pfs_t *
+hammer2_pfs_t *
 hammer2_pfsalloc(hammer2_chain_t *chain, const hammer2_inode_data_t *ripdata,
     hammer2_dev_t *force_local)
 {
 	hammer2_pfs_t *pmp = NULL;
 	hammer2_inode_t *iroot;
 	int i, j;
-
-	KASSERT(force_local, ("only local mount allowed"));
 
 	/*
 	 * Locate or create the PFS based on the cluster id.  If ripdata
@@ -229,12 +227,12 @@ hammer2_pfsalloc(hammer2_chain_t *chain, const hammer2_inode_data_t *ripdata,
 				continue;
 			if (force_local == NULL &&
 			    bcmp(&pmp->pfs_clid, &ripdata->meta.pfs_clid,
-			    sizeof(pmp->pfs_clid)) == 0) {
+			    sizeof(pmp->pfs_clid)) == 0)
 				break;
-			} else if (force_local && pmp->pfs_names[0] &&
-			    strcmp(pmp->pfs_names[0], (const char *)ripdata->filename) == 0) {
+			else if (force_local && pmp->pfs_names[0] &&
+			    strcmp(pmp->pfs_names[0],
+			    (const char *)ripdata->filename) == 0)
 				break;
-			}
 		}
 	}
 
@@ -283,36 +281,43 @@ hammer2_pfsalloc(hammer2_chain_t *chain, const hammer2_inode_data_t *ripdata,
 	/*
 	 * When a chain is passed in we must add it to the PFS's root
 	 * inode, update pmp->pfs_types[].
+	 *
 	 * When forcing local mode, mark the PFS as a MASTER regardless.
+	 *
+	 * At the moment empty spots can develop due to removals or failures.
+	 * Ultimately we want to re-fill these spots but doing so might
+	 * confused running code. XXX
 	 */
 	hammer2_inode_ref(iroot);
 	hammer2_mtx_ex(&iroot->lock);
+	j = iroot->cluster.nchains;
 
-	j = iroot->cluster.nchains; /* Currently always 0. */
-	KASSERT(j == 0, ("nchains %d not 0", j));
+	if (j == HAMMER2_MAXCLUSTER) {
+		hprintf("cluster full\n");
+		/* XXX fatal error? */
+	} else {
+		KKASSERT(chain->pmp == NULL);
+		chain->pmp = pmp;
+		hammer2_chain_ref(chain);
+		iroot->cluster.array[j].chain = chain;
+		if (force_local)
+			pmp->pfs_types[j] = HAMMER2_PFSTYPE_MASTER;
+		else
+			pmp->pfs_types[j] = ripdata->meta.pfs_type;
+		pmp->pfs_names[j] = kstrdup((const char *)ripdata->filename);
+		pmp->pfs_hmps[j] = chain->hmp;
+		hammer2_spin_ex(&pmp->inum_spin);
+		pmp->pfs_iroot_blocksets[j] = chain->data->ipdata.u.blockset;
+		hammer2_spin_unex(&pmp->inum_spin);
 
-	KKASSERT(chain->pmp == NULL);
-	chain->pmp = pmp;
-	hammer2_chain_ref(chain);
-	iroot->cluster.array[j].chain = chain;
-	if (force_local)
-		pmp->pfs_types[j] = HAMMER2_PFSTYPE_MASTER;
-	else
-		pmp->pfs_types[j] = ripdata->meta.pfs_type;
-	pmp->pfs_names[j] = kstrdup((const char *)ripdata->filename);
-	pmp->pfs_hmps[j] = chain->hmp;
-	hammer2_spin_ex(&pmp->inum_spin);
-	pmp->pfs_iroot_blocksets[j] = chain->data->ipdata.u.blockset;
-	hammer2_spin_unex(&pmp->inum_spin);
-
-	/*
-	 * If the PFS is already mounted we must account
-	 * for the mount_count here.
-	 */
-	if (pmp->mp)
-		++chain->hmp->mount_count;
-	++j;
-
+		/*
+		 * If the PFS is already mounted we must account
+		 * for the mount_count here.
+		 */
+		if (pmp->mp)
+			++chain->hmp->mount_count;
+		++j;
+	}
 	iroot->cluster.nchains = j;
 	hammer2_assert_cluster(&iroot->cluster);
 
@@ -320,6 +325,39 @@ hammer2_pfsalloc(hammer2_chain_t *chain, const hammer2_inode_data_t *ripdata,
 	hammer2_inode_drop(iroot);
 done:
 	return (pmp);
+}
+
+/*
+ * Deallocate an element of a probed PFS.
+ *
+ * This function does not physically destroy the PFS element in its device
+ * under the super-root  (see hammer2_ioctl_pfs_delete()).
+ */
+void
+hammer2_pfsdealloc(hammer2_pfs_t *pmp, int clindex, int destroying __unused)
+{
+	hammer2_inode_t *iroot;
+	hammer2_chain_t *chain;
+
+	/*
+	 * Cleanup our reference on iroot.  iroot is (should) not be needed
+	 * by the flush code.
+	 */
+	iroot = pmp->iroot;
+	if (iroot) {
+		/* Remove the cluster index from the group. */
+		hammer2_mtx_ex(&iroot->lock);
+		chain = iroot->cluster.array[clindex].chain;
+		iroot->cluster.array[clindex].chain = NULL;
+		pmp->pfs_types[clindex] = HAMMER2_PFSTYPE_NONE;
+		hammer2_mtx_unlock(&iroot->lock);
+
+		/* Release the chain. */
+		if (chain) {
+			atomic_set_int(&chain->flags, HAMMER2_CHAIN_RELEASE);
+			hammer2_chain_drop(chain);
+		}
+	}
 }
 
 /*
@@ -364,9 +402,9 @@ hammer2_pfsfree(hammer2_pfs_t *pmp)
 			if (chain && !RB_EMPTY(&chain->core.rbtree))
 				chains_still_present = 1;
 		}
-		KASSERT(iroot->refs == 1,
-		    ("iroot inum %016jx refs %d not 1",
-		    (intmax_t)iroot->meta.inum, iroot->refs));
+		KASSERTMSG(iroot->refs == 1,
+		    "iroot inum %016jx refs %d not 1",
+		    (intmax_t)iroot->meta.inum, iroot->refs);
 		hammer2_inode_drop(iroot);
 		pmp->iroot = NULL;
 	}
@@ -517,6 +555,9 @@ hammer2_mount(struct mount *mp)
 		return (EINVAL);
 	hflags = *hflagsp;
 
+	/* HMNT2_LOCAL is not allowed, it's already broken in DragonFly. */
+	KKASSERT((hflags & HMNT2_LOCAL) == 0);
+
 	if (mp->mnt_flag & MNT_UPDATE) {
 		/*
 		 * Update mount.  Note that pmp->iroot->cluster is
@@ -580,7 +621,7 @@ hammer2_mount(struct mount *mp)
 	 * check hmp will be non-NULL if we are doing the second or more
 	 * HAMMER2 mounts from the same device.
 	 */
-	lockmgr(&hammer2_mntlk, LK_EXCLUSIVE, NULL);
+	hammer2_lk_ex(&hammer2_mntlk);
 	if (!TAILQ_EMPTY(&devvpl)) {
 		/*
 		 * Match the device.  Due to the way devfs works,
@@ -607,6 +648,23 @@ hammer2_mount(struct mount *mp)
 next_hmp:
 			continue;
 		}
+		/*
+		 * If no match this may be a fresh H2 mount, make sure
+		 * the device is not mounted on anything else.
+		 */
+		if (hmp == NULL) {
+			TAILQ_FOREACH(e, &devvpl, entry) {
+				KKASSERT(e->devvp);
+				error = 0; /* vfs_mountedon(e->devvp); */
+				if (error) {
+					hprintf("%s mounted %d\n", e->path,
+					    error);
+					hammer2_cleanup_devvp(&devvpl);
+					hammer2_lk_unlock(&hammer2_mntlk);
+					return (error);
+				}
+			}
+		}
 	} else {
 		/* Match the label to a pmp already probed. */
 		TAILQ_FOREACH(pmp, &hammer2_pfslist, mntentry) {
@@ -623,7 +681,7 @@ next_hmp:
 		if (hmp == NULL) {
 			hprintf("PFS label \"%s\" not found\n", label);
 			hammer2_cleanup_devvp(&devvpl);
-			lockmgr(&hammer2_mntlk, LK_RELEASE, NULL);
+			hammer2_lk_unlock(&hammer2_mntlk);
 			return (ENOENT);
 		}
 	}
@@ -639,7 +697,7 @@ next_hmp:
 		if (error) {
 			hammer2_close_devvp(&devvpl);
 			hammer2_cleanup_devvp(&devvpl);
-			lockmgr(&hammer2_mntlk, LK_RELEASE, NULL);
+			hammer2_lk_unlock(&hammer2_mntlk);
 			return (error);
 		}
 
@@ -651,28 +709,28 @@ next_hmp:
 		if (error) {
 			hammer2_close_devvp(&devvpl);
 			hammer2_cleanup_devvp(&devvpl);
-			lockmgr(&hammer2_mntlk, LK_RELEASE, NULL);
+			hammer2_lk_unlock(&hammer2_mntlk);
 			free(hmp, M_HAMMER2);
 			return (error);
 		}
 		if (!hmp->devvp) {
 			hprintf("failed to initialize root volume\n");
 			hammer2_unmount_helper(mp, NULL, hmp);
-			lockmgr(&hammer2_mntlk, LK_RELEASE, NULL);
+			hammer2_lk_unlock(&hammer2_mntlk);
 			hammer2_unmount(mp, MNT_FORCE);
 			return (EINVAL);
 		}
 
 		hmp->rdonly = rdonly;
 		hmp->hflags = hflags & HMNT2_DEVFLAGS;
-		KKASSERT(hmp->hflags & HMNT2_LOCAL);
 
 		TAILQ_INSERT_TAIL(&hammer2_mntlist, hmp, mntentry);
 		RB_INIT(&hmp->iotree);
 		hammer2_mtx_init(&hmp->iotree_lock, "h2hmp_iotlk");
 
-		lockinit(&hmp->vollk, PVFS, "h2vol", 0, 0);
-		lockinit(&hmp->bflk, PVFS, "h2bflk", 0, 0);
+		hammer2_lk_init(&hmp->vollk, "h2vol");
+		hammer2_lk_init(&hmp->bulklk, "h2bulk");
+		hammer2_lk_init(&hmp->bflk, "h2bflk");
 
 		/*
 		 * vchain setup.  vchain.data is embedded.
@@ -766,7 +824,7 @@ next_hmp:
 		if (schain == NULL) {
 			hprintf("invalid super-root\n");
 			hammer2_unmount_helper(mp, NULL, hmp);
-			lockmgr(&hammer2_mntlk, LK_RELEASE, NULL);
+			hammer2_lk_unlock(&hammer2_mntlk);
 			hammer2_unmount(mp, MNT_FORCE);
 			return (EINVAL);
 		}
@@ -777,7 +835,7 @@ next_hmp:
 			hammer2_chain_drop(schain);
 			schain = NULL;
 			hammer2_unmount_helper(mp, NULL, hmp);
-			lockmgr(&hammer2_mntlk, LK_RELEASE, NULL);
+			hammer2_lk_unlock(&hammer2_mntlk);
 			hammer2_unmount(mp, MNT_FORCE);
 			return (EINVAL);
 		}
@@ -833,18 +891,16 @@ next_hmp:
 		/* hmp->devvp_list is already constructed. */
 		hammer2_cleanup_devvp(&devvpl);
 		spmp = hmp->spmp;
-		/* XXX FreeBSD HAMMER2 always has HMNT2_LOCAL set, so ignore.
 		if (hflags & HMNT2_DEVFLAGS)
 			hprintf("WARNING: mount flags pertaining to the whole "
 			    "device may only be specified on the first mount "
 			    "of the device: %08x\n",
 			    hflags & HMNT2_DEVFLAGS);
-		*/
 	}
 
 	/*
-	 * Force local mount (disassociate all PFSs from their clusters)
-	 * if HMNT2_LOCAL.
+	 * Force local mount (disassociate all PFSs from their clusters).
+	 * Used primarily for debugging.
 	 */
 	force_local = (hmp->hflags & HMNT2_LOCAL) ? hmp : NULL;
 
@@ -874,7 +930,7 @@ next_hmp:
 	/* PFS could not be found? */
 	if (chain == NULL) {
 		hammer2_unmount_helper(mp, NULL, hmp);
-		lockmgr(&hammer2_mntlk, LK_RELEASE, NULL);
+		hammer2_lk_unlock(&hammer2_mntlk);
 		hammer2_unmount(mp, MNT_FORCE);
 
 		if (error) {
@@ -901,7 +957,7 @@ next_hmp:
 	if (pmp == NULL) {
 		hprintf("failed to acquire PFS structure\n");
 		hammer2_unmount_helper(mp, NULL, hmp);
-		lockmgr(&hammer2_mntlk, LK_RELEASE, NULL);
+		hammer2_lk_unlock(&hammer2_mntlk);
 		hammer2_unmount(mp, MNT_FORCE);
 		return (EINVAL);
 	}
@@ -909,7 +965,7 @@ next_hmp:
 	if (pmp->mp) {
 		hprintf("PFS already mounted!\n");
 		hammer2_unmount_helper(mp, NULL, hmp);
-		lockmgr(&hammer2_mntlk, LK_RELEASE, NULL);
+		hammer2_lk_unlock(&hammer2_mntlk);
 		hammer2_unmount(mp, MNT_FORCE);
 		return (EBUSY);
 	}
@@ -937,7 +993,7 @@ next_hmp:
 
 	/* Connect up mount pointers. */
 	hammer2_mount_helper(mp, pmp);
-	lockmgr(&hammer2_mntlk, LK_RELEASE, NULL);
+	hammer2_lk_unlock(&hammer2_mntlk);
 
 	/* Initial statfs to prime mnt_stat. */
 	hammer2_statfs(mp, &mp->mnt_stat);
@@ -962,8 +1018,8 @@ hammer2_update_pmps(hammer2_dev_t *hmp)
 	int error;
 
 	/*
-	 * Force local mount (disassociate all PFSs from their clusters)
-	 * if HMNT2_LOCAL.
+	 * Force local mount (disassociate all PFSs from their clusters).
+	 * Used primarily for debugging.
 	 */
 	force_local = (hmp->hflags & HMNT2_LOCAL) ? hmp : NULL;
 
@@ -1004,22 +1060,32 @@ hammer2_unmount(struct mount *mp, int mntflags)
 	if (pmp == NULL)
 		return (0);
 
-	KKASSERT(pmp->mp);
-	KKASSERT(pmp->iroot);
+	hammer2_lk_ex(&hammer2_mntlk);
 
-	lockmgr(&hammer2_mntlk, LK_EXCLUSIVE, NULL);
-
+	/*
+	 * If mount initialization proceeded far enough we must flush
+	 * its vnodes and sync the underlying mount points.  Three syncs
+	 * are required to fully flush the filesystem (freemap updates lag
+	 * by one flush, and one extra for safety).
+	 */
 	if (mntflags & MNT_FORCE)
 		flags |= FORCECLOSE;
-	error = vflush(mp, 0, flags, curthread);
-	if (error) {
-		hprintf("vflush failed %d\n", error);
-		goto failed;
+	if (pmp->iroot) {
+		error = vflush(mp, 0, flags, curthread);
+		if (error) {
+			hprintf("vflush failed %d\n", error);
+			goto failed;
+		}
+		hammer2_sync(mp, MNT_WAIT);
+		hammer2_sync(mp, MNT_WAIT);
+		hammer2_sync(mp, MNT_WAIT);
+	} else {
+		debug_hprintf("no root inode"); /* failed before allocation */
 	}
 
 	hammer2_unmount_helper(mp, pmp, NULL);
 failed:
-	lockmgr(&hammer2_mntlk, LK_RELEASE, NULL);
+	hammer2_lk_unlock(&hammer2_mntlk);
 
 	if (TAILQ_EMPTY(&hammer2_mntlist))
 		hammer2_assert_clean();
@@ -1147,8 +1213,9 @@ again:
 	TAILQ_REMOVE(&hammer2_mntlist, hmp, mntentry);
 	hammer2_mtx_destroy(&hmp->iotree_lock);
 
-	lockdestroy(&hmp->vollk);
-	lockdestroy(&hmp->bflk);
+	hammer2_lk_destroy(&hmp->vollk);
+	hammer2_lk_destroy(&hmp->bulklk);
+	hammer2_lk_destroy(&hmp->bflk);
 
 	hammer2_print_iostat(&hmp->iostat_read, "read");
 	hammer2_print_iostat(&hmp->iostat_write, "write");
@@ -1478,7 +1545,7 @@ hammer2_sync(struct mount *mp, int waitfor)
 }
 
 int
-hammer2_vfs_sync_pmp(hammer2_pfs_t *pmp, int waitfor)
+hammer2_vfs_sync_pmp(hammer2_pfs_t *pmp, int waitfor __unused)
 {
 	hammer2_inode_t *ip;
 	hammer2_depend_t *depend, *depend_next;
@@ -1765,13 +1832,13 @@ restart:
 void
 hammer2_voldata_lock(hammer2_dev_t *hmp)
 {
-	lockmgr(&hmp->vollk, LK_EXCLUSIVE, NULL);
+	hammer2_lk_ex(&hmp->vollk);
 }
 
 void
 hammer2_voldata_unlock(hammer2_dev_t *hmp)
 {
-	lockmgr(&hmp->vollk, LK_RELEASE, NULL);
+	hammer2_lk_unlock(&hmp->vollk);
 }
 
 /*

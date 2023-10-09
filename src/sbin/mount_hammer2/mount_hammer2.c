@@ -121,7 +121,6 @@ main(int argc, char **argv)
 	}
 
 	args.fspec = canon_dev;
-	args.hflags = HMNT2_LOCAL; /* force local, not optional */
 
 	build_iovec(&iov, &iovlen, "fstype", fstype, (size_t)-1);
 	build_iovec(&iov, &iovlen, "fspath", canon_dir, (size_t)-1);

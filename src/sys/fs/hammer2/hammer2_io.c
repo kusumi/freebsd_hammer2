@@ -421,11 +421,11 @@ hammer2_io_data(hammer2_io_t *dio, hammer2_off_t lbase)
 	int off;
 
 	bp = dio->bp;
-	KASSERT(bp != NULL, ("NULL dio buf"));
+	KASSERTMSG(bp != NULL, "NULL dio buf");
 
 	lbase -= dio->dbase;
 	off = (lbase & ~HAMMER2_OFF_MASK_RADIX) - bp->b_offset;
-	KASSERT(off >= 0 && off < bp->b_bufsize, ("bad offset"));
+	KASSERTMSG(off >= 0 && off < bp->b_bufsize, "bad offset");
 
 	return (bp->b_data + off);
 }
@@ -584,12 +584,12 @@ hammer2_io_dedup_assert(hammer2_dev_t *hmp, hammer2_off_t data_off,
 		hammer2_assert_io_refs(dio); /* dio locked + refs > 0 */
 		hammer2_mtx_unlock(&hmp->iotree_lock);
 
-		KASSERT((dio->dedup_alloc &
+		KASSERTMSG((dio->dedup_alloc &
 		    hammer2_dedup_mask(dio, data_off, bytes)) == 0,
-		    ("%016jx/%d %016jx/%016jx",
+		    "%016jx/%d %016jx/%016jx",
 		    (intmax_t)data_off, bytes,
 		    (intmax_t)hammer2_dedup_mask(dio, data_off, bytes),
-		    (intmax_t)dio->dedup_alloc));
+		    (intmax_t)dio->dedup_alloc);
 
 		hammer2_mtx_unlock(&dio->lock);
 		hammer2_io_putblk(&dio);

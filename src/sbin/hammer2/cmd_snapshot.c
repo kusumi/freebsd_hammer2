@@ -1,11 +1,12 @@
-/*-
+/*
  * SPDX-License-Identifier: BSD-3-Clause
  *
  * Copyright (c) 2022-2023 Tomohiro Kusumi <tkusumi@netbsd.org>
- * Copyright (c) 2011-2022 The DragonFly Project.  All rights reserved.
+ * Copyright (c) 2011-2013 The DragonFly Project.  All rights reserved.
  *
  * This code is derived from software contributed to The DragonFly Project
  * by Matthew Dillon <dillon@dragonflybsd.org>
+ * by Venkatesh Srinivas <vsrinivas@dragonflybsd.org>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -35,33 +36,74 @@
  * SUCH DAMAGE.
  */
 
-#ifndef _FS_HAMMER2_COMPAT_H_
-#define _FS_HAMMER2_COMPAT_H_
+#include "hammer2.h"
 
-#include <sys/cdefs.h>
-#include <sys/kassert.h>
+/*
+ * The snapshot is named <PFSNAME>_<YYYYMMDD.HHMMSS.TRANSID> unless
+ * overridden by a label.
+ *
+ * When local non-cache media is involved the media is
+ * first synchronized and the snapshot is then based on
+ * the media.
+ *
+ * If the media is remote the snapshot is created on the remote
+ * end (if you have sufficient administrative rights) and a local
+ * ADMIN or CACHE PFS is created with a connection to the snapshot
+ * on the remote.
+ *
+ * If the client has snapshot rights to multiple remotes then TBD.
+ */
 
-/* KASSERT variant from DragonFly */
-#ifdef INVARIANTS
-#define KKASSERT(exp)	do { if (__predict_false(!(exp)))	  \
-				panic("assertion \"%s\" failed "  \
-				"in %s at %s:%u", #exp, __func__, \
-				__FILE__, __LINE__); } while (0)
-#else
-#define KKASSERT(exp)	do { } while (0)
-#endif
+int
+cmd_pfs_snapshot(const char *sel_path, const char *path, const char *label,
+		 uint32_t pfs_flags)
+{
+	hammer2_ioc_pfs_t pfs;
+	int ecode = 0;
+	int fd;
+	char filename[NAME_MAX + 256];
+	time_t t;
+	struct tm *tp;
 
-/* KASSERT variant from NetBSD */
-#define KASSERTMSG(exp, msg, ...)	\
-			KASSERT(exp, (msg, ## __VA_ARGS__))
+	if (path == NULL) {
+		fd = hammer2_ioctl_handle(sel_path);
+	} else {
+		fd = open(path, O_RDONLY);
+		if (fd < 0)
+			fprintf(stderr, "Unable to open %s\n", path);
+	}
+	if (fd < 0)
+		return 1;
 
-#define cpu_pause	cpu_spinwait
+	if (label == NULL) {
+		time(&t);
+		tp = localtime(&t);
+		bzero(&pfs, sizeof(pfs));
+		pfs.name_key = (hammer2_key_t)-1;
+		if (ioctl(fd, HAMMER2IOC_PFS_GET, &pfs) < 0) {
+			perror("ioctl");
+		}
+		snprintf(filename, sizeof(filename),
+			 "%s.%04d%02d%02d.%02d%02d%02d",
+			 pfs.name,
+			 tp->tm_year + 1900,
+			 tp->tm_mon + 1,
+			 tp->tm_mday,
+			 tp->tm_hour,
+			 tp->tm_min,
+			 tp->tm_sec);
+		label = filename;
+	}
 
-#define cpu_ccfence	__compiler_membar
+	bzero(&pfs, sizeof(pfs));
+	strlcpy(pfs.name, label, sizeof(pfs.name));
+	pfs.pfs_flags = pfs_flags;
 
-#define getticks()	(ticks)
-
-#define kstrdup(s)	strdup(s, M_TEMP)
-#define kstrfree(s)	free(s, M_TEMP)
-
-#endif /* !_FS_HAMMER2_COMPAT_H_ */
+	if (ioctl(fd, HAMMER2IOC_PFS_SNAPSHOT, &pfs) < 0) {
+		perror("ioctl");
+		ecode = 1;
+	} else {
+		printf("created snapshot %s\n", label);
+	}
+	return ecode;
+}

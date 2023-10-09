@@ -149,6 +149,16 @@ hammer2_pfstype_to_str(uint8_t type)
 		return("NONE");
 	case HAMMER2_PFSTYPE_SUPROOT:
 		return("SUPROOT");
+	case HAMMER2_PFSTYPE_DUMMY:
+		return("DUMMY");
+	case HAMMER2_PFSTYPE_CACHE:
+		return("CACHE");
+	case HAMMER2_PFSTYPE_SLAVE:
+		return("SLAVE");
+	case HAMMER2_PFSTYPE_SOFT_SLAVE:
+		return("SOFT_SLAVE");
+	case HAMMER2_PFSTYPE_SOFT_MASTER:
+		return("SOFT_MASTER");
 	case HAMMER2_PFSTYPE_MASTER:
 		return("MASTER");
 	default:
@@ -162,6 +172,10 @@ hammer2_pfssubtype_to_str(uint8_t subtype)
 	switch(subtype) {
 	case HAMMER2_PFSSUBTYPE_NONE:
 		return("NONE");
+	case HAMMER2_PFSSUBTYPE_SNAPSHOT:
+		return("SNAPSHOT");
+	case HAMMER2_PFSSUBTYPE_AUTOSNAP:
+		return("AUTOSNAP");
 	default:
 		return("ILLEGAL");
 	}
@@ -354,15 +368,8 @@ get_hammer2_mounts(int *acp)
 	/*
 	 * Get a stable list of mount points
 	 */
-again:
-	n = getfsstat(NULL, 0, MNT_NOWAIT);
+	n = getmntinfo(&fs, MNT_NOWAIT);
 	av = calloc(n, sizeof(char *));
-	fs = calloc(n, sizeof(struct statfs));
-	if (getfsstat(fs, sizeof(*fs) * n, MNT_NOWAIT) != n) {
-		free(av);
-		free(fs);
-		goto again;
-	}
 
 	/*
 	 * Pull out hammer2 filesystems only
@@ -373,7 +380,6 @@ again:
 		av[w++] = strdup(fs[i].f_mntonname);
 	}
 	*acp = w;
-	free(fs);
 
 	return av;
 }

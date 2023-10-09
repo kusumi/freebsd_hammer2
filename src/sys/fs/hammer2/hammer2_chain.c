@@ -265,8 +265,8 @@ hammer2_chain_insert(hammer2_chain_t *parent, hammer2_chain_t *chain, int flags,
 
 	/* Insert chain. */
 	xchain = RB_INSERT(hammer2_chain_tree, &parent->core.rbtree, chain);
-	KASSERT(xchain == NULL, ("collision %016jx/%d",
-	    (intmax_t)chain->bref.key, chain->bref.keybits));
+	KASSERTMSG(xchain == NULL, "collision %016jx/%d",
+	    (intmax_t)chain->bref.key, chain->bref.keybits);
 
 	atomic_set_int(&chain->flags, HAMMER2_CHAIN_ONRBTREE);
 	chain->parent = parent;
@@ -595,8 +595,10 @@ hammer2_chain_lastdrop(hammer2_chain_t *chain, int depth)
 			depth = 1;
 		}
 
-		if (parent)
+		if (parent) {
 			hammer2_spin_unex(&parent->core.spin);
+			parent = NULL; /* safety */
+		}
 		hammer2_spin_unex(&chain->core.spin);
 		hammer2_mtx_unlock(&chain->lock);
 
@@ -671,6 +673,7 @@ hammer2_chain_lastdrop(hammer2_chain_t *chain, int depth)
 			atomic_add_int(&rdrop->refs, 1);
 		}
 		hammer2_spin_unex(&parent->core.spin);
+		parent = NULL; /* safety */
 	} else {
 		/* No-parent case. */
 		if (atomic_cmpset_int(&chain->refs, 1, 0) == 0) {
@@ -2858,10 +2861,10 @@ again:
 	if ((parent->flags & HAMMER2_CHAIN_COUNTEDBREFS) == 0)
 		hammer2_chain_countbrefs(parent, base, count);
 
-	KASSERT(parent->core.live_count >= 0 &&
+	KASSERTMSG(parent->core.live_count >= 0 &&
 	    parent->core.live_count <= count,
-	    ("bad live_count %d/%d (%02x, %d)",
-	    parent->core.live_count, count, parent->bref.type, parent->bytes));
+	    "bad live_count %d/%d (%02x, %d)",
+	    parent->core.live_count, count, parent->bref.type, parent->bytes);
 
 	/*
 	 * If no free blockref could be found we must create an indirect
@@ -4576,12 +4579,13 @@ hammer2_base_insert(hammer2_chain_t *parent, hammer2_blockref_t *base,
 	j = i;
 	k = i;
 	while (j > 0 || k < count) {
+		/* NetBSD bcopy(9) doesn't support overlapped region. */
 		--j;
 		if (j >= 0 && base[j].type == HAMMER2_BREF_TYPE_EMPTY) {
 			if (j == i - 1) {
 				base[j] = *elm;
 			} else {
-				bcopy(&base[j+1], &base[j],
+				memmove(&base[j], &base[j+1],
 				    (i - j - 1) * sizeof(*base));
 				base[i - 1] = *elm;
 			}
@@ -4589,7 +4593,7 @@ hammer2_base_insert(hammer2_chain_t *parent, hammer2_blockref_t *base,
 		}
 		++k;
 		if (k < count && base[k].type == HAMMER2_BREF_TYPE_EMPTY) {
-			bcopy(&base[i], &base[i+1],
+			memmove(&base[i+1], &base[i],
 			    (k - i) * sizeof(hammer2_blockref_t));
 			base[i] = *elm;
 			/*
