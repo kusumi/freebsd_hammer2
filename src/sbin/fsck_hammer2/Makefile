@@ -11,6 +11,6 @@ WARNS=	3
 CFLAGS+=	-I../../sys
 CFLAGS+=	-I../hammer2
 
-LIBADD=		md
+LIBADD+=	md
 
 .include <bsd.prog.mk>
