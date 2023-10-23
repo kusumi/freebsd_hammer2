@@ -91,7 +91,7 @@ hammer2_lookup_device(const struct mount *mp, const char *path,
 	VOP_UNLOCK(devvp);
 	*devvpp = devvp;
 
-	return (error);
+	return (0);
 }
 
 int

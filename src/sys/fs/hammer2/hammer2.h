@@ -68,48 +68,30 @@
 #include <sys/kernel.h>
 #include <sys/limits.h>
 #include <sys/errno.h>
-#include <sys/proc.h>
 #include <sys/malloc.h>
 #include <sys/buf.h>
 #include <sys/mount.h>
 #include <sys/vnode.h>
 #include <sys/queue.h>
 #include <sys/tree.h>
-#include <sys/lock.h>
-#include <sys/sx.h>
 #include <sys/uuid.h>
+#include <sys/stat.h>
+#ifdef INVARIANTS
+#include <sys/kdb.h> /* kdb_backtrace */
+#endif
 
 #include <vm/uma.h>
 
 #include <machine/atomic.h>
 
 #include "hammer2_compat.h"
+#include "hammer2_os.h"
 #include "hammer2_disk.h"
 #include "hammer2_ioctl.h"
 #include "hammer2_rb.h"
 
 /* See FreeBSD src b214fcceacad6b842545150664bd2695c1c2b34f */
 #define FREEBSD_READDIR_COOKIES_64 1400045
-
-/* printf(9) variants for HAMMER2 */
-#ifdef INVARIANTS
-#define HFMT	"%s(%s|%d): "
-#define HARGS	__func__, \
-    curproc ? curproc->p_comm : "-", \
-    curthread ? curthread->td_tid : -1
-#else
-#define HFMT	"%s: "
-#define HARGS	__func__
-#endif
-
-#define hprintf(X, ...)	printf(HFMT X, HARGS, ## __VA_ARGS__)
-#define hpanic(X, ...)	panic(HFMT X, HARGS, ## __VA_ARGS__)
-
-#ifdef INVARIANTS
-#define debug_hprintf	hprintf
-#else
-#define debug_hprintf(X, ...)	do { } while (0)
-#endif
 
 struct hammer2_io;
 struct hammer2_chain;
@@ -126,61 +108,6 @@ typedef struct hammer2_inode hammer2_inode_t;
 typedef struct hammer2_dev hammer2_dev_t;
 typedef struct hammer2_pfs hammer2_pfs_t;
 typedef union hammer2_xop hammer2_xop_t;
-
-/*
- * hammer2_lk is lockmgr(9) in DragonFly.
- */
-typedef struct lock hammer2_lk_t;
-
-#define hammer2_lk_init(p, s)		lockinit(p, PVFS, s, 0, 0)
-#define hammer2_lk_ex(p)		lockmgr(p, LK_EXCLUSIVE, NULL)
-#define hammer2_lk_unlock(p)		lockmgr(p, LK_RELEASE, NULL)
-#define hammer2_lk_destroy(p)		lockdestroy(p)
-
-/*
- * Mutex and lock shims.
- * Normal synchronous non-abortable locks can be substituted for spinlocks.
- * FreeBSD HAMMER2 currently uses sx(9) for both mtx and spinlock.
- */
-typedef struct sx hammer2_mtx_t;
-
-/* Zero on success. */
-#define hammer2_mtx_init(p, s)		sx_init(p, s)
-#define hammer2_mtx_init_recurse(p, s)	sx_init_flags(p, s, SX_RECURSE)
-#define hammer2_mtx_ex(p)		sx_xlock(p)
-#define hammer2_mtx_ex_try(p)		(!sx_try_xlock(p))
-#define hammer2_mtx_sh(p)		sx_slock(p)
-#define hammer2_mtx_sh_try(p)		(!sx_try_slock(p))
-#define hammer2_mtx_unlock(p)		sx_unlock(p)
-#define hammer2_mtx_destroy(p)		sx_destroy(p)
-#define hammer2_mtx_sleep(c, p, s)	sx_sleep(c, p, 0, s, 0)
-#define hammer2_mtx_wakeup(c)		wakeup(c)
-
-/* sx_try_upgrade panics on INVARIANTS if already exclusively locked. */
-#define hammer2_mtx_upgrade_try(p)	(!sx_try_upgrade(p))
-
-/* Non-zero if exclusively locked by the calling thread. */
-#define hammer2_mtx_owned(p)		sx_xlocked(p)
-
-#define hammer2_mtx_assert_locked(p)	sx_assert(p, SA_LOCKED)
-#define hammer2_mtx_assert_unlocked(p)	sx_assert(p, SA_UNLOCKED)
-#define hammer2_mtx_assert_ex(p)	sx_assert(p, SA_XLOCKED)
-#define hammer2_mtx_assert_sh(p)	sx_assert(p, SA_SLOCKED)
-
-typedef struct sx hammer2_spin_t;
-
-/* Zero on success. */
-#define hammer2_spin_init(p, s)		sx_init(p, s)
-#define hammer2_spin_ex(p)		sx_xlock(p)
-#define hammer2_spin_sh(p)		sx_slock(p)
-#define hammer2_spin_unex(p)		sx_xunlock(p)
-#define hammer2_spin_unsh(p)		sx_sunlock(p)
-#define hammer2_spin_destroy(p)		sx_destroy(p)
-
-#define hammer2_spin_assert_locked(p)	sx_assert(p, SA_LOCKED)
-#define hammer2_spin_assert_unlocked(p)	sx_assert(p, SA_UNLOCKED)
-#define hammer2_spin_assert_ex(p)	sx_assert(p, SA_XLOCKED)
-#define hammer2_spin_assert_sh(p)	sx_assert(p, SA_SLOCKED)
 
 /* global list of PFS */
 TAILQ_HEAD(hammer2_pfslist, hammer2_pfs); /* <-> hammer2_pfs::mntentry */
@@ -528,6 +455,7 @@ struct hammer2_inode {
 	unsigned int		refs;		/* +vpref, +flushref */
 	unsigned int		flags;		/* for HAMMER2_INODE_xxx */
 	int			ipdep_idx;
+	int			vhold;
 };
 
 /*
@@ -566,6 +494,7 @@ struct hammer2_inode {
 #define HAMMER2_INODE_MODIFIED		0x0001
 #define HAMMER2_INODE_ONRBTREE		0x0008
 #define HAMMER2_INODE_RESIZED		0x0010	/* requires inode_chain_sync */
+#define HAMMER2_INODE_ISUNLINKED	0x0040
 #define HAMMER2_INODE_SIDEQ		0x0100	/* on side processing queue */
 #define HAMMER2_INODE_NOSIDEQ		0x0200	/* disable sideq operation */
 #define HAMMER2_INODE_DIRTYDATA		0x0400	/* interlocks inode flush */
@@ -683,6 +612,10 @@ struct hammer2_xop_unlink {
 	int			dopermanent;
 };
 
+#define H2DOPERM_PERMANENT	0x01
+#define H2DOPERM_FORCE		0x02
+#define H2DOPERM_IGNINO		0x04
+
 struct hammer2_xop_scanlhc {
 	hammer2_xop_head_t	head;
 	hammer2_key_t		lhc;
@@ -693,15 +626,21 @@ struct hammer2_xop_lookup {
 	hammer2_key_t		lhc;
 };
 
-#define H2DOPERM_PERMANENT	0x01
-#define H2DOPERM_FORCE		0x02
-#define H2DOPERM_IGNINO		0x04
+struct hammer2_xop_mkdirent {
+	hammer2_xop_head_t	head;
+	hammer2_dirent_head_t	dirent;
+	hammer2_key_t		lhc;
+};
 
 struct hammer2_xop_create {
 	hammer2_xop_head_t	head;
 	hammer2_inode_meta_t	meta;
 	hammer2_key_t		lhc;
 	int			flags;
+};
+
+struct hammer2_xop_destroy {
+	hammer2_xop_head_t	head;
 };
 
 struct hammer2_xop_bmap {
@@ -736,7 +675,9 @@ typedef struct hammer2_xop_nresolve hammer2_xop_nresolve_t;
 typedef struct hammer2_xop_unlink hammer2_xop_unlink_t;
 typedef struct hammer2_xop_scanlhc hammer2_xop_scanlhc_t;
 typedef struct hammer2_xop_lookup hammer2_xop_lookup_t;
+typedef struct hammer2_xop_mkdirent hammer2_xop_mkdirent_t;
 typedef struct hammer2_xop_create hammer2_xop_create_t;
+typedef struct hammer2_xop_destroy hammer2_xop_destroy_t;
 typedef struct hammer2_xop_bmap hammer2_xop_bmap_t;
 typedef struct hammer2_xop_fsync hammer2_xop_fsync_t;
 typedef struct hammer2_xop_flush hammer2_xop_flush_t;
@@ -750,7 +691,9 @@ union hammer2_xop {
 	hammer2_xop_unlink_t	xop_unlink;
 	hammer2_xop_scanlhc_t	xop_scanlhc;
 	hammer2_xop_lookup_t	xop_lookup;
+	hammer2_xop_mkdirent_t	xop_mkdirent;
 	hammer2_xop_create_t	xop_create;
+	hammer2_xop_destroy_t	xop_destroy;
 	hammer2_xop_bmap_t	xop_bmap;
 	hammer2_xop_fsync_t	xop_fsync;
 	hammer2_xop_flush_t	xop_flush;
@@ -853,6 +796,7 @@ struct hammer2_dev {
 	hammer2_lk_t		bulklk;		/* bulkfree operation lock */
 	hammer2_lk_t		bflk;		/* bulk-free manual function lock */
 	int			freemap_relaxed;
+	hammer2_off_t		free_reserved;	/* nominal free reserved */
 	hammer2_off_t		heur_freemap[HAMMER2_FREEMAP_HEUR_SIZE];
 	hammer2_dedup_t		heur_dedup[HAMMER2_DEDUP_HEUR_SIZE];
 	hammer2_iostat_t	iostat_read;	/* read I/O stat */
@@ -898,7 +842,10 @@ struct hammer2_pfs {
 	int			flags;		/* for HAMMER2_PMPF_xxx */
 	int			rdonly;		/* read-only mount */
 	int			lru_count;	/* #of chains on LRU */
+	int			free_ticks;	/* free_* calculations */
 	unsigned long		ipdep_mask;
+	hammer2_off_t		free_reserved;
+	hammer2_off_t		free_nominal;
 	hammer2_tid_t		modify_tid;	/* modify transaction id */
 	hammer2_tid_t		inode_tid;	/* inode allocator */
 	hammer2_inoq_head_t	syncq;		/* SYNCQ flagged inodes */
@@ -951,7 +898,11 @@ extern hammer2_xop_desc_t hammer2_unlink_desc;
 extern hammer2_xop_desc_t hammer2_scanlhc_desc;
 extern hammer2_xop_desc_t hammer2_lookup_desc;
 extern hammer2_xop_desc_t hammer2_delete_desc;
+extern hammer2_xop_desc_t hammer2_inode_mkdirent_desc;
 extern hammer2_xop_desc_t hammer2_inode_create_desc;
+extern hammer2_xop_desc_t hammer2_inode_create_det_desc;
+extern hammer2_xop_desc_t hammer2_inode_create_ins_desc;
+extern hammer2_xop_desc_t hammer2_inode_destroy_desc;
 extern hammer2_xop_desc_t hammer2_bmap_desc;
 extern hammer2_xop_desc_t hammer2_inode_chain_sync_desc;
 extern hammer2_xop_desc_t hammer2_inode_flush_desc;
@@ -960,6 +911,7 @@ extern hammer2_xop_desc_t hammer2_strategy_read_desc;
 /* hammer2_admin.c */
 void *hammer2_xop_alloc(hammer2_inode_t *, int);
 void hammer2_xop_setname(hammer2_xop_head_t *, const char *, size_t);
+size_t hammer2_xop_setname_inum(hammer2_xop_head_t *, hammer2_key_t);
 void hammer2_xop_start(hammer2_xop_head_t *, hammer2_xop_desc_t *);
 void hammer2_xop_retire(hammer2_xop_head_t *, uint32_t);
 int hammer2_xop_feed(hammer2_xop_head_t *, hammer2_chain_t *, int, int);
@@ -984,6 +936,7 @@ void hammer2_chain_unlock(hammer2_chain_t *);
 int hammer2_chain_modify(hammer2_chain_t *, hammer2_tid_t, hammer2_off_t, int);
 hammer2_chain_t *hammer2_chain_lookup_init(hammer2_chain_t *, int);
 void hammer2_chain_lookup_done(hammer2_chain_t *);
+hammer2_chain_t *hammer2_chain_getparent(hammer2_chain_t *, int);
 hammer2_chain_t *hammer2_chain_lookup(hammer2_chain_t **, hammer2_key_t *,
     hammer2_key_t, hammer2_key_t, int *, int);
 hammer2_chain_t *hammer2_chain_next(hammer2_chain_t **, hammer2_chain_t *,
@@ -1025,6 +978,8 @@ void hammer2_trans_setflags(hammer2_pfs_t *, uint32_t);
 void hammer2_trans_clearflags(hammer2_pfs_t *, uint32_t);
 hammer2_tid_t hammer2_trans_sub(hammer2_pfs_t *);
 void hammer2_trans_done(hammer2_pfs_t *, uint32_t);
+hammer2_tid_t hammer2_trans_newinum(hammer2_pfs_t *);
+void hammer2_trans_assert_strategy(hammer2_pfs_t *);
 int hammer2_flush(hammer2_chain_t *, int);
 void hammer2_xop_inode_flush(hammer2_xop_t *, int);
 
@@ -1035,7 +990,10 @@ void hammer2_freemap_adjust(hammer2_dev_t *, hammer2_blockref_t *, int);
 /* hammer2_inode.c */
 void hammer2_inode_delayed_sideq(hammer2_inode_t *);
 void hammer2_inode_lock(hammer2_inode_t *, int);
+void hammer2_inode_lock4(hammer2_inode_t *, hammer2_inode_t *,
+    hammer2_inode_t *, hammer2_inode_t *);
 void hammer2_inode_unlock(hammer2_inode_t *);
+void hammer2_inode_depend(hammer2_inode_t *, hammer2_inode_t *);
 hammer2_chain_t *hammer2_inode_chain(hammer2_inode_t *, int, int);
 hammer2_chain_t *hammer2_inode_chain_and_parent(hammer2_inode_t *, int,
     hammer2_chain_t **, int);
@@ -1047,10 +1005,19 @@ hammer2_inode_t *hammer2_inode_get(hammer2_pfs_t *, hammer2_xop_head_t *,
     hammer2_tid_t, int);
 hammer2_inode_t *hammer2_inode_create_pfs(hammer2_pfs_t *, const char *,
     size_t, int *);
+hammer2_inode_t *hammer2_inode_create_normal(hammer2_inode_t *, struct vattr *,
+    struct ucred *, hammer2_key_t, int *);
+int hammer2_dirent_create(hammer2_inode_t *, const char *, size_t,
+    hammer2_key_t, uint8_t);
 hammer2_key_t hammer2_inode_data_count(const hammer2_inode_t *);
 hammer2_key_t hammer2_inode_inode_count(const hammer2_inode_t *);
+int hammer2_inode_unlink_finisher(hammer2_inode_t *, struct vnode **);
 void hammer2_inode_modify(hammer2_inode_t *);
+int hammer2_inode_vhold(hammer2_inode_t *);
+void hammer2_inode_vdrop_all(hammer2_inode_t *);
 int hammer2_inode_chain_sync(hammer2_inode_t *);
+int hammer2_inode_chain_ins(hammer2_inode_t *);
+int hammer2_inode_chain_des(hammer2_inode_t *);
 int hammer2_inode_chain_flush(hammer2_inode_t *, int);
 
 /* hammer2_io.c */
@@ -1097,8 +1064,10 @@ void hammer2_dedup_clear(hammer2_dev_t *);
 /* hammer2_subr.c */
 int hammer2_get_dtype(uint8_t);
 int hammer2_get_vtype(uint8_t);
+uint8_t hammer2_get_obj_type(uint8_t);
 void hammer2_time_to_timespec(uint64_t, struct timespec *);
 uint32_t hammer2_to_unix_xid(const struct uuid *);
+void hammer2_guid_to_uuid(struct uuid *, uint32_t);
 hammer2_key_t hammer2_dirhash(const char *, size_t);
 int hammer2_getradix(size_t);
 int hammer2_calc_logical(hammer2_inode_t *, hammer2_off_t, hammer2_key_t *,
@@ -1119,6 +1088,7 @@ int hammer2_vfs_sync_pmp(hammer2_pfs_t *, int);
 void hammer2_voldata_lock(hammer2_dev_t *);
 void hammer2_voldata_unlock(hammer2_dev_t *);
 void hammer2_voldata_modify(hammer2_dev_t *);
+int hammer2_vfs_enospace(hammer2_inode_t *, off_t, struct ucred *);
 
 /* hammer2_xops.c */
 void hammer2_xop_ipcluster(hammer2_xop_t *, int);
@@ -1128,7 +1098,11 @@ void hammer2_xop_unlink(hammer2_xop_t *, int);
 void hammer2_xop_scanlhc(hammer2_xop_t *, int);
 void hammer2_xop_lookup(hammer2_xop_t *, int);
 void hammer2_xop_delete(hammer2_xop_t *, int);
+void hammer2_xop_inode_mkdirent(hammer2_xop_t *, int);
 void hammer2_xop_inode_create(hammer2_xop_t *, int);
+void hammer2_xop_inode_create_det(hammer2_xop_t *, int);
+void hammer2_xop_inode_create_ins(hammer2_xop_t *, int);
+void hammer2_xop_inode_destroy(hammer2_xop_t *, int);
 void hammer2_xop_bmap(hammer2_xop_t *, int);
 void hammer2_xop_inode_chain_sync(hammer2_xop_t *, int);
 
