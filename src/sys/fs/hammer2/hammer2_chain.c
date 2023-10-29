@@ -201,7 +201,8 @@ hammer2_chain_init(hammer2_chain_t *chain)
 	RB_INIT(&chain->core.rbtree);
 	hammer2_mtx_init_recurse(&chain->lock, "h2ch_lk");
 	hammer2_mtx_init(&chain->diolk, "h2ch_dlk");
-	hammer2_mtx_init(&chain->inp_lock, "h2ch_inplk");
+	hammer2_lk_init(&chain->inp_lock, "h2ch_inplk");
+	hammer2_lkc_init(&chain->inp_cv, "h2ch_inplkc");
 	hammer2_spin_init(&chain->core.spin, "h2ch_cosp");
 }
 
@@ -714,7 +715,8 @@ hammer2_chain_lastdrop(hammer2_chain_t *chain, int depth)
 		atomic_clear_int(&chain->flags, HAMMER2_CHAIN_ALLOCATED);
 		hammer2_mtx_destroy(&chain->lock);
 		hammer2_mtx_destroy(&chain->diolk);
-		hammer2_mtx_destroy(&chain->inp_lock);
+		hammer2_lk_destroy(&chain->inp_lock);
+		hammer2_lkc_destroy(&chain->inp_cv);
 		hammer2_spin_destroy(&chain->core.spin);
 		chain->hmp = NULL;
 		free(chain, M_HAMMER2);
@@ -993,15 +995,15 @@ hammer2_chain_load_data(hammer2_chain_t *chain)
 	 * inp_lock protects HAMMER2_CHAIN_{IOINPROG,SIGNAL} bits.
 	 * DragonFly uses tsleep_interlock(9) here without taking mutex.
 	 */
-	hammer2_mtx_ex(&chain->inp_lock);
+	hammer2_lk_ex(&chain->inp_lock);
 again:
 	if (chain->flags & HAMMER2_CHAIN_IOINPROG) {
 		atomic_set_int(&chain->flags, HAMMER2_CHAIN_IOSIGNAL);
-		hammer2_mtx_sleep(&chain->flags, &chain->inp_lock, "h2ch");
+		hammer2_lkc_sleep(&chain->inp_cv, &chain->inp_lock, "h2ch_inp");
 		goto again;
 	}
 	atomic_set_int(&chain->flags, HAMMER2_CHAIN_IOINPROG);
-	hammer2_mtx_unlock(&chain->inp_lock);
+	hammer2_lk_unlock(&chain->inp_lock);
 
 	/*
 	 * We own CHAIN_IOINPROG.
@@ -1088,13 +1090,13 @@ again:
 done:
 	/* Release HAMMER2_CHAIN_IOINPROG and signal waiters if requested. */
 	KKASSERT(chain->flags & HAMMER2_CHAIN_IOINPROG);
-	hammer2_mtx_ex(&chain->inp_lock);
+	hammer2_lk_ex(&chain->inp_lock);
 	atomic_clear_int(&chain->flags, HAMMER2_CHAIN_IOINPROG);
 	if (chain->flags & HAMMER2_CHAIN_IOSIGNAL) {
 		atomic_clear_int(&chain->flags, HAMMER2_CHAIN_IOSIGNAL);
-		hammer2_mtx_wakeup(&chain->flags);
+		hammer2_lkc_wakeup(&chain->inp_cv);
 	}
-	hammer2_mtx_unlock(&chain->inp_lock);
+	hammer2_lk_unlock(&chain->inp_lock);
 }
 
 /*

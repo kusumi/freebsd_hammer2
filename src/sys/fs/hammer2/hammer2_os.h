@@ -41,7 +41,6 @@
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/proc.h>
-#include <sys/lock.h>
 #include <sys/sx.h>
 
 /* printf(9) variants for HAMMER2 */
@@ -65,12 +64,22 @@
 #endif
 
 /* hammer2_lk is lockmgr(9) in DragonFly. */
-typedef struct lock hammer2_lk_t;
+typedef struct sx hammer2_lk_t;
 
-#define hammer2_lk_init(p, s)		lockinit(p, PVFS, s, 0, 0)
-#define hammer2_lk_ex(p)		lockmgr(p, LK_EXCLUSIVE, NULL)
-#define hammer2_lk_unlock(p)		lockmgr(p, LK_RELEASE, NULL)
-#define hammer2_lk_destroy(p)		lockdestroy(p)
+#define hammer2_lk_init(p, s)		sx_init(p, s)
+#define hammer2_lk_ex(p)		sx_xlock(p)
+#define hammer2_lk_unlock(p)		sx_unlock(p)
+#define hammer2_lk_destroy(p)		sx_destroy(p)
+
+#define hammer2_lk_assert_ex(p)		sx_assert(p, SA_XLOCKED)
+#define hammer2_lk_assert_unlocked(p)	sx_assert(p, SA_UNLOCKED)
+
+typedef int hammer2_lkc_t;
+
+#define hammer2_lkc_init(c, s)		do {} while (0)
+#define hammer2_lkc_destroy(c)		do {} while (0)
+#define hammer2_lkc_sleep(c, p, s)	sx_sleep(c, p, 0, s, 0)
+#define hammer2_lkc_wakeup(c)		wakeup(c)
 
 /*
  * Mutex and spinlock shims.
@@ -79,7 +88,6 @@ typedef struct lock hammer2_lk_t;
  */
 typedef struct sx hammer2_mtx_t;
 
-/* Zero on success. */
 #define hammer2_mtx_init(p, s)		sx_init(p, s)
 #define hammer2_mtx_init_recurse(p, s)	sx_init_flags(p, s, SX_RECURSE)
 #define hammer2_mtx_ex(p)		sx_xlock(p)
@@ -124,7 +132,6 @@ hammer2_mtx_temp_restore(hammer2_mtx_t *p, int x)
 
 typedef struct sx hammer2_spin_t;
 
-/* Zero on success. */
 #define hammer2_spin_init(p, s)		sx_init(p, s)
 #define hammer2_spin_ex(p)		sx_xlock(p)
 #define hammer2_spin_sh(p)		sx_slock(p)

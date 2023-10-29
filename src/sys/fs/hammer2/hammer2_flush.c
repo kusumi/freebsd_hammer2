@@ -71,6 +71,14 @@ static int hammer2_flush_core(hammer2_flush_info_t *, hammer2_chain_t *, int);
 static int hammer2_flush_recurse(hammer2_chain_t *, void *);
 
 /*
+ * Any per-pfs transaction initialization goes here.
+ */
+void
+hammer2_trans_manage_init(hammer2_pfs_t *pmp)
+{
+}
+
+/*
  * Transaction support for any modifying operation.  Transactions are used
  * in the pmp layer by the frontend and in the spmp layer by the backend.
  *
@@ -89,7 +97,7 @@ hammer2_trans_init(hammer2_pfs_t *pmp, uint32_t flags)
 	uint32_t oflags, nflags;
 	int dowait;
 
-	hammer2_mtx_ex(&pmp->trans_lock);
+	hammer2_lk_ex(&pmp->trans_lock);
 	for (;;) {
 		oflags = pmp->trans.flags;
 		cpu_ccfence();
@@ -128,8 +136,8 @@ hammer2_trans_init(hammer2_pfs_t *pmp, uint32_t flags)
 		if (atomic_cmpset_int(&pmp->trans.flags, oflags, nflags)) {
 			if (dowait == 0)
 				break;
-			hammer2_mtx_sleep(&pmp->trans.sync_wait,
-			    &pmp->trans_lock, "h2trans");
+			hammer2_lkc_sleep(&pmp->trans_cv, &pmp->trans_lock,
+			    "h2pmp_tr");
 			/* retry */
 		} else {
 			cpu_pause();
@@ -137,7 +145,7 @@ hammer2_trans_init(hammer2_pfs_t *pmp, uint32_t flags)
 		}
 		/* retry */
 	}
-	hammer2_mtx_unlock(&pmp->trans_lock);
+	hammer2_lk_unlock(&pmp->trans_lock);
 }
 
 /*
@@ -177,20 +185,20 @@ hammer2_trans_clearflags(hammer2_pfs_t *pmp, uint32_t flags)
 {
 	uint32_t oflags, nflags;
 
-	hammer2_mtx_ex(&pmp->trans_lock);
+	hammer2_lk_ex(&pmp->trans_lock);
 	for (;;) {
 		oflags = pmp->trans.flags;
 		cpu_ccfence();
 		nflags = oflags & ~flags;
 		if (atomic_cmpset_int(&pmp->trans.flags, oflags, nflags)) {
 			if ((oflags ^ nflags) & HAMMER2_TRANS_WAITING)
-				hammer2_mtx_wakeup(&pmp->trans.sync_wait);
+				hammer2_lkc_wakeup(&pmp->trans_cv);
 			break;
 		}
 		cpu_pause();
 		/* retry */
 	}
-	hammer2_mtx_unlock(&pmp->trans_lock);
+	hammer2_lk_unlock(&pmp->trans_lock);
 }
 
 void
@@ -203,7 +211,7 @@ hammer2_trans_done(hammer2_pfs_t *pmp, uint32_t flags)
 	 * a flush transaction or transitioning the non-flush transaction
 	 * count from 2->1 while a flush transaction is pending.
 	 */
-	hammer2_mtx_ex(&pmp->trans_lock);
+	hammer2_lk_ex(&pmp->trans_lock);
 	for (;;) {
 		oflags = pmp->trans.flags;
 		cpu_ccfence();
@@ -219,13 +227,13 @@ hammer2_trans_done(hammer2_pfs_t *pmp, uint32_t flags)
 
 		if (atomic_cmpset_int(&pmp->trans.flags, oflags, nflags)) {
 			if ((oflags ^ nflags) & HAMMER2_TRANS_WAITING)
-				hammer2_mtx_wakeup(&pmp->trans.sync_wait);
+				hammer2_lkc_wakeup(&pmp->trans_cv);
 			break;
 		}
 		cpu_pause();
 		/* retry */
 	}
-	hammer2_mtx_unlock(&pmp->trans_lock);
+	hammer2_lk_unlock(&pmp->trans_lock);
 }
 
 /*

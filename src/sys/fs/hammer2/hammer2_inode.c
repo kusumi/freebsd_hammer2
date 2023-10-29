@@ -723,6 +723,7 @@ again:
 	 */
 	nip->refs = 1;
 	hammer2_mtx_init_recurse(&nip->lock, "h2ip_lk");
+	hammer2_mtx_init(&nip->truncate_lock, "h2ip_trlk");
 	hammer2_mtx_ex(&nip->lock);
 	TAILQ_INIT(&nip->depend_static.sideq);
 
