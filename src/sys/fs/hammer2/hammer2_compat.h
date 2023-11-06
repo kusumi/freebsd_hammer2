@@ -38,22 +38,17 @@
 #ifndef _FS_HAMMER2_COMPAT_H_
 #define _FS_HAMMER2_COMPAT_H_
 
+#include <sys/param.h>
+#include <sys/systm.h>
 #include <sys/cdefs.h>
-#include <sys/kassert.h>
-
-/* KASSERT variant from DragonFly */
-#ifdef INVARIANTS
-#define KKASSERT(exp)	do { if (__predict_false(!(exp)))	  \
-				panic("assertion \"%s\" failed "  \
-				"in %s at %s:%u", #exp, __func__, \
-				__FILE__, __LINE__); } while (0)
-#else
-#define KKASSERT(exp)	do { } while (0)
-#endif
 
 /* KASSERT variant from NetBSD */
-#define KASSERTMSG(exp, msg, ...)	\
-			KASSERT(exp, (msg, ## __VA_ARGS__))
+#define KASSERTMSG(exp, msg, ...) KASSERT(exp, (msg, ## __VA_ARGS__))
+
+/* KASSERT variant from DragonFly */
+#define KKASSERT(exp)	KASSERTMSG(exp, \
+	"assertion \"%s\" failed in %s at %s:%u", \
+	#exp, __func__, __FILE__, __LINE__)
 
 #define cpu_pause	cpu_spinwait
 

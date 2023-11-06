@@ -563,6 +563,10 @@ hammer2_mount(struct mount *mp)
 	hflags = *hflagsp;
 
 	/* HMNT2_LOCAL is not allowed, it's already broken in DragonFly. */
+	if (hflags & HMNT2_LOCAL) {
+		hprintf("HMNT2_LOCAL is not allowed\n");
+		return (EINVAL);
+	}
 	KKASSERT((hflags & HMNT2_LOCAL) == 0);
 
 	if (mp->mnt_flag & MNT_UPDATE) {

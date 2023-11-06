@@ -43,7 +43,6 @@
 #include <sys/proc.h>
 #include <sys/sx.h>
 
-/* printf(9) variants for HAMMER2 */
 #ifdef INVARIANTS
 #define HFMT	"%s(%s|%d): "
 #define HARGS	__func__, \
@@ -105,10 +104,10 @@ typedef struct sx hammer2_mtx_t;
 /* Non-zero if exclusively locked by the calling thread. */
 #define hammer2_mtx_owned(p)		sx_xlocked(p)
 
-#define hammer2_mtx_assert_locked(p)	sx_assert(p, SA_LOCKED)
-#define hammer2_mtx_assert_unlocked(p)	sx_assert(p, SA_UNLOCKED)
 #define hammer2_mtx_assert_ex(p)	sx_assert(p, SA_XLOCKED)
 #define hammer2_mtx_assert_sh(p)	sx_assert(p, SA_SLOCKED)
+#define hammer2_mtx_assert_locked(p)	sx_assert(p, SA_LOCKED)
+#define hammer2_mtx_assert_unlocked(p)	sx_assert(p, SA_UNLOCKED)
 
 static __inline int
 hammer2_mtx_temp_release(hammer2_mtx_t *p)
@@ -139,9 +138,9 @@ typedef struct sx hammer2_spin_t;
 #define hammer2_spin_unsh(p)		sx_sunlock(p)
 #define hammer2_spin_destroy(p)		sx_destroy(p)
 
-#define hammer2_spin_assert_locked(p)	sx_assert(p, SA_LOCKED)
-#define hammer2_spin_assert_unlocked(p)	sx_assert(p, SA_UNLOCKED)
 #define hammer2_spin_assert_ex(p)	sx_assert(p, SA_XLOCKED)
 #define hammer2_spin_assert_sh(p)	sx_assert(p, SA_SLOCKED)
+#define hammer2_spin_assert_locked(p)	sx_assert(p, SA_LOCKED)
+#define hammer2_spin_assert_unlocked(p)	sx_assert(p, SA_UNLOCKED)
 
 #endif /* !_FS_HAMMER2_OS_H_ */
