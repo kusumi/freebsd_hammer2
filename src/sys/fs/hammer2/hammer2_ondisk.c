@@ -58,8 +58,7 @@ hammer2_lookup_device(const struct mount *mp, const char *path,
 	KKASSERT(path);
 	KKASSERT(*path != '\0');
 
-	/* See FreeBSD src 7e1d3eefd410ca0fbae5a217422821244c3eeee4 */
-#if __FreeBSD_version >= 1400043
+#if __FreeBSD_version >= FREEBSD_NDINIT_ARGUMENT
 	NDINIT(ndp, LOOKUP, FOLLOW | LOCKLEAF, UIO_SYSSPACE, path);
 #else
 	NDINIT(ndp, LOOKUP, FOLLOW | LOCKLEAF, UIO_SYSSPACE, path, td);
@@ -219,6 +218,7 @@ hammer2_init_devvp(const struct mount *mp, const char *blkdevs,
 		e = malloc(sizeof(*e), M_HAMMER2, M_WAITOK | M_ZERO);
 		e->devvp = devvp;
 		e->path = kstrdup(path);
+		cluster_init_vn(&e->clusterw);
 		TAILQ_INSERT_TAIL(devvpl, e, entry);
 	}
 
@@ -493,7 +493,7 @@ hammer2_read_volume_header(struct vnode *devvp, const char *path,
 	hammer2_volume_data_t *vd;
 	hammer2_crc32_t crc0, crc1;
 	const struct g_consumer *cp;
-	struct buf *bp = NULL;
+	struct buf *bp;
 	off_t blkoff;
 	daddr_t blkno;
 	int i, zone = -1;
@@ -516,10 +516,8 @@ hammer2_read_volume_header(struct vnode *devvp, const char *path,
 
 		/* FreeBSD bread(9) doesn't fail with blkno beyond its size. */
 		blkno = blkoff / DEV_BSIZE;
-		if (bread(devvp, blkno, HAMMER2_VOLUME_BYTES, NOCRED, &bp)) {
-			bp = NULL;
+		if (bread(devvp, blkno, HAMMER2_VOLUME_BYTES, NOCRED, &bp))
 			continue;
-		}
 
 		vd = (struct hammer2_volume_data *)bp->b_data;
 		/* Verify volume header magic. */
@@ -527,7 +525,6 @@ hammer2_read_volume_header(struct vnode *devvp, const char *path,
 		    (vd->magic != HAMMER2_VOLUME_ID_ABO)) {
 			hprintf("%s #%d: bad magic\n", path, i);
 			brelse(bp);
-			bp = NULL;
 			continue;
 		}
 		if (vd->magic == HAMMER2_VOLUME_ID_ABO) {
@@ -535,7 +532,6 @@ hammer2_read_volume_header(struct vnode *devvp, const char *path,
 			hprintf("%s #%d: reverse-endian filesystem detected\n",
 			    path, i);
 			brelse(bp);
-			bp = NULL;
 			continue;
 		}
 
@@ -548,7 +544,6 @@ hammer2_read_volume_header(struct vnode *devvp, const char *path,
 			    "%08x/%08x\n",
 			    path, i, crc0, crc1);
 			brelse(bp);
-			bp = NULL;
 			continue;
 		}
 		crc0 = vd->icrc_sects[HAMMER2_VOL_ICRC_SECT1];
@@ -559,7 +554,6 @@ hammer2_read_volume_header(struct vnode *devvp, const char *path,
 			    "%08x/%08x\n",
 			    path, i, crc0, crc1);
 			brelse(bp);
-			bp = NULL;
 			continue;
 		}
 		crc0 = vd->icrc_volheader;
@@ -570,7 +564,6 @@ hammer2_read_volume_header(struct vnode *devvp, const char *path,
 			    "%08x/%08x\n",
 			    path, i, crc0, crc1);
 			brelse(bp);
-			bp = NULL;
 			continue;
 		}
 
@@ -579,7 +572,6 @@ hammer2_read_volume_header(struct vnode *devvp, const char *path,
 			zone = i;
 		}
 		brelse(bp);
-		bp = NULL;
 	}
 
 	if (zone == -1) {

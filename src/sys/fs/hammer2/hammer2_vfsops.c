@@ -54,6 +54,7 @@ MALLOC_DEFINE(M_HAMMER2, "hammer2_mount", "HAMMER2 mount structure");
 uma_zone_t hammer2_inode_zone;
 uma_zone_t hammer2_xops_zone;
 uma_zone_t hammer2_rbuf_zone;
+uma_zone_t hammer2_wbuf_zone;
 
 /* global list of HAMMER2 */
 TAILQ_HEAD(hammer2_mntlist, hammer2_dev); /* <-> hammer2_dev::mntentry */
@@ -66,15 +67,20 @@ static hammer2_pfslist_t hammer2_spmplist;
 
 hammer2_lk_t hammer2_mntlk;
 
+/* sysctl */
 static int hammer2_supported_version = HAMMER2_VOL_VERSION_DEFAULT;
 int hammer2_cluster_meta_read = 1; /* for physical read-ahead */
 int hammer2_cluster_data_read = 4; /* for physical read-ahead */
+int hammer2_cluster_write; /* for physical write clustering */
 long hammer2_inode_allocs;
 long hammer2_chain_allocs;
 long hammer2_dio_allocs;
 int hammer2_dio_limit = 256;
 int hammer2_limit_scan_depth;
 long hammer2_limit_saved_chains;
+int hammer2_always_compress;
+
+/* not sysctl */
 long hammer2_count_modified_chains;
 
 SYSCTL_NODE(_vfs, OID_AUTO, hammer2, CTLFLAG_RW, 0, "HAMMER2 filesystem");
@@ -84,6 +90,8 @@ SYSCTL_INT(_vfs_hammer2, OID_AUTO, cluster_meta_read, CTLFLAG_RW,
     &hammer2_cluster_meta_read, 0, "Cluster read count for meta data");
 SYSCTL_INT(_vfs_hammer2, OID_AUTO, cluster_data_read, CTLFLAG_RW,
     &hammer2_cluster_data_read, 0, "Cluster read count for user data");
+SYSCTL_INT(_vfs_hammer2, OID_AUTO, cluster_write, CTLFLAG_RW,
+    &hammer2_cluster_write, 0, "Cluster write count for device vnode");
 SYSCTL_LONG(_vfs_hammer2, OID_AUTO, inode_allocs, CTLFLAG_RD,
     &hammer2_inode_allocs, 0, "Number of inode allocated");
 SYSCTL_LONG(_vfs_hammer2, OID_AUTO, chain_allocs, CTLFLAG_RD,
@@ -96,9 +104,12 @@ SYSCTL_INT(_vfs_hammer2, OID_AUTO, limit_scan_depth, CTLFLAG_RW,
     &hammer2_limit_scan_depth, 0, "Bulkfree scan depth limit");
 SYSCTL_LONG(_vfs_hammer2, OID_AUTO, limit_saved_chains, CTLFLAG_RW,
     &hammer2_limit_saved_chains, 0, "Bulkfree saved chains limit");
+SYSCTL_INT(_vfs_hammer2, OID_AUTO, always_compress, CTLFLAG_RW,
+    &hammer2_always_compress, 0, "Always try to compress write buffer");
 
 static const char *hammer2_opts[] = {
-	"export", "from", "hflags", NULL,
+	"async", "export", "force", "from", "noatime", "noclusterr",
+	"noclusterw", "nosymfollow", "suiddir", "sync", "hflags", NULL,
 };
 
 static int
@@ -148,9 +159,13 @@ hammer2_init(struct vfsconf *vfsp)
 	    NULL, NULL, NULL, NULL, UMA_ALIGN_PTR, 0);
 	KKASSERT(hammer2_xops_zone);
 
-	hammer2_rbuf_zone = uma_zcreate("h2rbufzone", 65536,
+	hammer2_rbuf_zone = uma_zcreate("h2rbufzone", HAMMER2_PBUFSIZE,
 	    NULL, NULL, NULL, NULL, UMA_ALIGN_PTR, 0);
 	KKASSERT(hammer2_rbuf_zone);
+
+	hammer2_wbuf_zone = uma_zcreate("h2wbufzone", HAMMER2_PBUFSIZE / 2,
+	    NULL, NULL, NULL, NULL, UMA_ALIGN_PTR, 0);
+	KKASSERT(hammer2_wbuf_zone);
 
 	hammer2_lk_init(&hammer2_mntlk, "h2mntlk");
 
@@ -191,6 +206,10 @@ hammer2_uninit(struct vfsconf *vfsp)
 	if (hammer2_rbuf_zone) {
 		uma_zdestroy(hammer2_rbuf_zone);
 		hammer2_rbuf_zone = NULL;
+	}
+	if (hammer2_wbuf_zone) {
+		uma_zdestroy(hammer2_wbuf_zone);
+		hammer2_wbuf_zone = NULL;
 	}
 
 	hammer2_assert_clean();
@@ -606,8 +625,8 @@ hammer2_mount(struct mount *mp)
 	label = strchr(devstr, '@');
 	if (label == NULL || label[1] == 0) {
 		/*
-		 * DragonFly uses either "BOOT", "ROOT" or "DATA" based
-		 * on label[-1].  In FreeBSD, simply use "DATA" by default.
+		 * DragonFly HAMMER2 uses either "BOOT", "ROOT" or "DATA"
+		 * based on label[-1].
 		 */
 		label = "DATA";
 	} else {
@@ -1275,7 +1294,7 @@ again:
 	hammer2_mtx_ex(&hmp->iotree_lock);
 	hammer2_io_cleanup(hmp, &hmp->iotree);
 	if (hmp->iofree_count) {
-		hprintf("%d I/O's left hanging\n", hmp->iofree_count);
+		hprintf("XXX %d I/O's left hanging\n", hmp->iofree_count);
 		//KKASSERT(0); /* XXX2 enable this */
 	}
 	hammer2_mtx_unlock(&hmp->iotree_lock);
@@ -1621,7 +1640,7 @@ hammer2_vfs_sync_pmp(hammer2_pfs_t *pmp, int waitfor __unused)
 	hammer2_depend_t *depend, *depend_next;
 	struct vnode *vp;
 	uint32_t pass2;
-	int error, dorestart;
+	int error, dorestart, ndrop;
 
 	/*
 	 * Move all inodes on sideq to syncq.  This will clear sideq.
@@ -1854,8 +1873,9 @@ restart:
 			} else {
 				hammer2_inode_delayed_sideq(ip);
 			}
+			ndrop = ip->vhold;
 			vput(vp);
-			hammer2_inode_vdrop_all(ip);
+			hammer2_inode_vdrop(ip, ndrop);
 			vp = NULL; /* safety */
 		}
 		atomic_clear_int(&ip->flags, HAMMER2_INODE_SYNCQ_PASS2);

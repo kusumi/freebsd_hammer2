@@ -42,6 +42,7 @@
 #include <sys/uio.h>
 #include <sys/unistd.h>
 #include <sys/priv.h>
+#include <sys/vmmeter.h>
 
 #include <vm/vm.h>
 #include <vm/vm_extern.h>
@@ -250,6 +251,7 @@ hammer2_getattr(struct vop_getattr_args *ap)
 	hammer2_time_to_timespec(ip->meta.ctime, &vap->va_ctime);
 	hammer2_time_to_timespec(ip->meta.mtime, &vap->va_mtime);
 	hammer2_time_to_timespec(ip->meta.mtime, &vap->va_atime);
+	//bzero(&vap->va_birthtime, sizeof(vap->va_birthtime));
 	vap->va_gen = 1;
 	vap->va_blocksize = vp->v_mount->mnt_stat.f_iosize;
 	if (ip->meta.type == HAMMER2_OBJTYPE_DIRECTORY) {
@@ -708,6 +710,10 @@ hammer2_read_file(hammer2_inode_t *ip, struct uio *uio, int ioflag)
 	size_t n;
 	int lblksize, loff, seqcount = 0, error = 0;
 
+	KKASSERT(uio->uio_rw == UIO_READ);
+	KKASSERT(uio->uio_offset >= 0);
+	KKASSERT(uio->uio_resid >= 0);
+
 	if (ioflag)
 		seqcount = ioflag >> IO_SEQSHIFT;
 
@@ -725,21 +731,17 @@ hammer2_read_file(hammer2_inode_t *ip, struct uio *uio, int ioflag)
 	while (uio->uio_resid > 0 && (hammer2_off_t)uio->uio_offset < isize) {
 		lblksize = hammer2_calc_logical(ip, uio->uio_offset, &lbase,
 		    NULL);
+		KKASSERT(lblksize <= MAXBSIZE);
 		lbn = lbase / lblksize;
-		bp = NULL;
 
-		if ((hammer2_off_t)(lbn + 1) * lblksize >= isize)
-			error = bread(ip->vp, lbn, lblksize, NOCRED, &bp);
-		else if ((vp->v_mount->mnt_flag & MNT_NOCLUSTERR) == 0)
+		if ((vp->v_mount->mnt_flag & MNT_NOCLUSTERR) == 0)
 			error = cluster_read(vp, isize, lbn, lblksize, NOCRED,
 			    uio->uio_resid, seqcount, 0, &bp);
 		else
-			error = bread(ip->vp, lbn, lblksize, NOCRED, &bp);
+			error = bread(vp, lbn, lblksize, NOCRED, &bp);
 		KKASSERT(error == 0 || bp == NULL);
-		if (error) {
-			bp = NULL;
+		if (error)
 			break;
-		}
 
 		loff = (int)(uio->uio_offset - lbase);
 		n = lblksize - loff;
@@ -750,7 +752,6 @@ hammer2_read_file(hammer2_inode_t *ip, struct uio *uio, int ioflag)
 		error = uiomove(bp->b_data + loff, n, uio);
 		if (error) {
 			brelse(bp);
-			bp = NULL;
 			break;
 		}
 		vfs_bio_brelse(bp, ioflag);
@@ -786,13 +787,245 @@ hammer2_read(struct vop_read_args *ap)
 	return (hammer2_read_file(ip, ap->a_uio, ap->a_ioflag));
 }
 
-#if 0
+/*
+ * Write to the file represented by the inode via the logical buffer cache.
+ * The inode may represent a regular file or a symlink.
+ *
+ * The inode must not be locked.
+ */
+static int
+hammer2_write_file(hammer2_inode_t *ip, struct uio *uio, int ioflag)
+{
+	struct vnode *vp = ip->vp;
+	struct buf *bp;
+	hammer2_key_t old_eof, new_eof, lbase;
+	daddr_t lbn;
+	size_t n;
+	int lblksize, loff, trivial, endofblk;
+	int modified = 0, seqcount = 0, error = 0;
+
+	KKASSERT(uio->uio_rw == UIO_WRITE);
+	KKASSERT(uio->uio_offset >= 0);
+	KKASSERT(uio->uio_resid >= 0);
+
+	if (ioflag)
+		seqcount = ioflag >> IO_SEQSHIFT;
+
+	error = vn_rlimit_fsize(vp, uio, uio->uio_td);
+	if (error)
+		return (error);
+
+	/*
+	 * Setup if append.
+	 *
+	 * WARNING! Assumes that the kernel interlocks size changes at the
+	 *	    vnode level.
+	 */
+	hammer2_mtx_ex(&ip->lock);
+	hammer2_mtx_sh(&ip->truncate_lock);
+	if (ioflag & IO_APPEND)
+		uio->uio_offset = ip->meta.size;
+	old_eof = ip->meta.size;
+
+	/*
+	 * Extend the file if necessary.  If the write fails at some point
+	 * we will truncate it back down to cover as much as we were able
+	 * to write.
+	 *
+	 * Doing this now makes it easier to calculate buffer sizes in
+	 * the loop.
+	 */
+	if (uio->uio_offset + uio->uio_resid > old_eof) {
+		new_eof = uio->uio_offset + uio->uio_resid;
+		modified = 1;
+		hammer2_extend_file(ip, new_eof);
+	} else {
+		new_eof = old_eof;
+	}
+	hammer2_mtx_unlock(&ip->lock);
+
+	/* UIO write loop. */
+	while (uio->uio_resid > 0) {
+		/*
+		 * This nominally tells us how much we can cluster and
+		 * what the logical buffer size needs to be.  Currently
+		 * we don't try to cluster the write and just handle one
+		 * block at a time.
+		 */
+		lblksize = hammer2_calc_logical(ip, uio->uio_offset, &lbase,
+		    NULL);
+		KKASSERT(lblksize <= MAXBSIZE);
+		lbn = lbase / lblksize;
+		loff = (int)(uio->uio_offset - lbase);
+
+		/*
+		 * Calculate bytes to copy this transfer and whether the
+		 * copy completely covers the buffer or not.
+		 */
+		trivial = 0;
+		n = lblksize - loff;
+		if (n > uio->uio_resid) {
+			n = uio->uio_resid;
+			if (((hammer2_key_t)loff == lbase) &&
+			    (uio->uio_offset + n == new_eof))
+				trivial = 1;
+			endofblk = 0;
+		} else {
+			if (loff == 0)
+				trivial = 1;
+			endofblk = 1;
+		}
+		if (lbase >= new_eof)
+			trivial = 1;
+
+		/* Get the buffer. */
+		if (uio->uio_segflg == UIO_NOCOPY) {
+			/*
+			 * Issuing a write with the same data backing the
+			 * buffer.  Instantiate the buffer to collect the
+			 * backing vm pages, then read-in any missing bits.
+			 *
+			 * This case is used by vop_stdputpages().
+			 */
+			bp = getblk(vp, lbn, lblksize, 0, 0, 0);
+			if ((bp->b_flags & B_CACHE) == 0) {
+				bqrelse(bp);
+				error = bread(vp, lbn, lblksize, NOCRED, &bp);
+			}
+		} else if (trivial) {
+			/*
+			 * Even though we are entirely overwriting the buffer
+			 * we may still have to zero it out to avoid a
+			 * mmap/write visibility issue.
+			 */
+			bp = getblk(vp, lbn, lblksize, 0, 0, 0);
+			if ((bp->b_flags & B_CACHE) == 0)
+				vfs_bio_clrbuf(bp);
+		} else {
+			/*
+			 * Partial overwrite, read in any missing bits then
+			 * replace the portion being written.
+			 *
+			 * (The strategy code will detect zero-fill physical
+			 * blocks for this case).
+			 */
+			error = bread(vp, lbn, lblksize, NOCRED, &bp);
+		}
+		if (error)
+			break;
+
+		if ((ioflag & (IO_SYNC | IO_INVAL)) == (IO_SYNC | IO_INVAL))
+			bp->b_flags |= B_NOCACHE;
+
+		/* Ok, copy the data in. */
+		error = uiomove(bp->b_data + loff, n, uio);
+		modified = 1;
+		if (error && (bp->b_flags & B_CACHE) == 0)
+			vfs_bio_clrbuf(bp);
+		vfs_bio_set_flags(bp, ioflag);
+
+		/*
+		 * WARNING: Pageout daemon will issue UIO_NOCOPY writes
+		 *	    with IO_SYNC or IO_ASYNC set.  These writes
+		 *	    must be handled as the pageout daemon expects.
+		 *
+		 * NOTE!    H2 relies on cluster_write() here because it
+		 *	    cannot preallocate disk blocks at the logical
+		 *	    level due to not knowing what the compression
+		 *	    size will be at this time.
+		 *
+		 *	    We must use cluster_write() here and we depend
+		 *	    on the write-behind feature to flush buffers
+		 *	    appropriately.  If we let the buffer daemons do
+		 *	    it the block allocations will be all over the
+		 *	    map.
+		 */
+		if (ioflag & IO_SYNC) {
+			(void)bwrite(bp);
+		} else if ((ioflag & IO_DIRECT) && endofblk) {
+			bp->b_flags |= B_CLUSTEROK;
+			bawrite(bp);
+		} else if ((ioflag & IO_ASYNC) || vm_page_count_severe() ||
+		    buf_dirty_count_severe()) {
+			bp->b_flags |= B_CLUSTEROK;
+			bawrite(bp);
+		} else if (vp->v_mount->mnt_flag & MNT_NOCLUSTERW) {
+			bdwrite(bp);
+		} else {
+			bp->b_flags |= B_CLUSTEROK;
+			cluster_write_vn(vp, &ip->clusterw, bp, new_eof,
+			    seqcount, 0);
+		}
+	}
+
+	/*
+	 * Cleanup.  If we extended the file EOF but failed to write through
+	 * the entire write is a failure and we have to back-up.
+	 */
+	if (error && new_eof != old_eof) {
+		hammer2_mtx_unlock(&ip->truncate_lock);
+		hammer2_mtx_ex(&ip->lock); /* note lock order */
+		hammer2_mtx_ex(&ip->truncate_lock); /* note lock order */
+		hammer2_truncate_file(ip, old_eof);
+		if (ip->flags & HAMMER2_INODE_MODIFIED)
+			hammer2_inode_chain_sync(ip);
+		hammer2_mtx_unlock(&ip->lock);
+	} else if (modified) {
+		hammer2_mtx_ex(&ip->lock);
+		hammer2_inode_modify(ip);
+		hammer2_update_time(&ip->meta.mtime);
+		hammer2_mtx_unlock(&ip->lock);
+	}
+	hammer2_trans_assert_strategy(ip->pmp);
+	hammer2_mtx_unlock(&ip->truncate_lock);
+
+	return (error);
+}
+
 static int
 hammer2_write(struct vop_write_args *ap)
 {
-	return (EOPNOTSUPP);
+	struct vnode *vp = ap->a_vp;
+	struct uio *uio = ap->a_uio;
+	hammer2_inode_t *ip = VTOI(vp);
+	int error, ioflag = ap->a_ioflag;
+
+	if (vp->v_type != VREG)
+		return (EINVAL);
+
+	if (ip->pmp->rdonly || (ip->pmp->flags & HAMMER2_PMPF_EMERG))
+		return (EROFS);
+	switch (hammer2_vfs_enospace(ip, uio->uio_resid, ap->a_cred)) {
+	case 2:
+		return (ENOSPC);
+	case 1:
+		ioflag |= IO_DIRECT; /* semi-synchronous */
+		break;
+	default:
+		break;
+	}
+
+	/*
+	 * The transaction interlocks against flush initiations
+	 * (note: but will run concurrently with the actual flush).
+	 *
+	 * To avoid deadlocking against the VM system, we must flag any
+	 * transaction related to the buffer cache or other direct
+	 * VM page manipulation.
+	 */
+	if (uio->uio_segflg == UIO_NOCOPY)
+		hammer2_trans_init(ip->pmp, HAMMER2_TRANS_BUFCACHE);
+	else
+		hammer2_trans_init(ip->pmp, 0);
+	error = hammer2_write_file(ip, uio, ioflag);
+	if (uio->uio_segflg == UIO_NOCOPY)
+		hammer2_trans_done(ip->pmp,
+		    HAMMER2_TRANS_BUFCACHE | HAMMER2_TRANS_SIDEQ);
+	else
+		hammer2_trans_done(ip->pmp, HAMMER2_TRANS_SIDEQ);
+
+	return (error);
 }
-#endif
 
 /*
  * Truncate the size of a file.  The inode must be locked.
@@ -825,6 +1058,7 @@ hammer2_truncate_file(hammer2_inode_t *ip, hammer2_key_t nsize)
 	ip->meta.size = nsize;
 	atomic_set_int(&ip->flags, HAMMER2_INODE_RESIZED);
 	hammer2_inode_modify(ip);
+	cluster_init_vn(&ip->clusterw);
 }
 
 /*
@@ -846,17 +1080,13 @@ static void
 hammer2_extend_file(hammer2_inode_t *ip, hammer2_key_t nsize)
 {
 	hammer2_key_t osize;
+	struct buf *bp;
+	int error;
 
 	hammer2_mtx_assert_locked(&ip->lock);
 
 	KKASSERT((ip->flags & HAMMER2_INODE_RESIZED) == 0);
 	osize = ip->meta.size;
-	/* XXX */
-	if (osize <= HAMMER2_EMBEDDED_BYTES && nsize > HAMMER2_EMBEDDED_BYTES) {
-		hprintf("%jd -> %jd not supported yet\n",
-		    (intmax_t)osize, (intmax_t)nsize);
-		return;
-	}
 
 	hammer2_inode_modify(ip);
 	ip->osize = osize;
@@ -875,30 +1105,23 @@ hammer2_extend_file(hammer2_inode_t *ip, hammer2_key_t nsize)
 	 * is extracted from the inode structure directly.
 	 */
 	if (osize <= HAMMER2_EMBEDDED_BYTES && nsize > HAMMER2_EMBEDDED_BYTES) {
-#if 0
 		if (osize) {
-			struct buf *bp;
-
-			oblksize = hammer2_get_logical();
-			error = bread_kvabio(ip->vp, 0, oblksize, &bp);
+			error = bread(ip->vp, 0, hammer2_get_logical(), NOCRED,
+			    &bp);
 			atomic_set_int(&ip->flags, HAMMER2_INODE_RESIZED);
 			hammer2_inode_chain_sync(ip);
-			if (error == 0) {
-				bheavy(bp);
+			if (error == 0)
 				bdwrite(bp);
-			} else {
-				brelse(bp);
-			}
 		} else {
 			atomic_set_int(&ip->flags, HAMMER2_INODE_RESIZED);
 			hammer2_inode_chain_sync(ip);
 		}
-#endif
 	}
 	hammer2_mtx_unlock(&ip->lock);
 	if (ip->vp)
 		vnode_pager_setsize(ip->vp, nsize);
 	hammer2_mtx_ex(&ip->lock);
+	cluster_init_vn(&ip->clusterw);
 }
 
 /*
@@ -1499,11 +1722,11 @@ hammer2_rename(struct vop_rename_args *ap)
 	}
 
 	error = vn_lock(fvp, LK_EXCLUSIVE);
-	if (error != 0)
+	if (error)
 		goto abortit;
 	if (fdvp != tdvp) {
 		error = vn_lock(fdvp, LK_EXCLUSIVE);
-		if (error != 0) {
+		if (error) {
 			VOP_UNLOCK(fvp);
 			goto abortit;
 		}
@@ -1746,12 +1969,12 @@ hammer2_symlink(struct vop_symlink_args *ap)
 	struct componentname *cnp = ap->a_cnp;
 	struct vnode *dvp = ap->a_dvp;
 	struct vnode *vp;
+	struct uio auio;
+	struct iovec aiov;
 	hammer2_inode_t *dip = VTOI(dvp), *nip;
 	hammer2_tid_t inum;
 	uint64_t mtime;
 	int error;
-
-	return (EOPNOTSUPP); /* XXX */
 
 	if (dip->pmp->rdonly || (dip->pmp->flags & HAMMER2_PMPF_EMERG))
 		return (EROFS);
@@ -1801,26 +2024,18 @@ hammer2_symlink(struct vop_symlink_args *ap)
 
 	/* Build the softlink. */
 	if (error == 0) {
-#if 0
-		size_t bytes;
-		struct uio auio;
-		struct iovec aiov;
-
-		bytes = strlen(ap->a_target);
 		bzero(&auio, sizeof(auio));
 		bzero(&aiov, sizeof(aiov));
 		auio.uio_iov = &aiov;
+		auio.uio_iovcnt = 1;
+		auio.uio_offset = 0;
+		auio.uio_resid = strlen(ap->a_target);
 		auio.uio_segflg = UIO_SYSSPACE;
 		auio.uio_rw = UIO_WRITE;
-		auio.uio_resid = bytes;
-		auio.uio_iovcnt = 1;
 		auio.uio_td = curthread;
-		aiov.iov_base = ap->a_target;
-		aiov.iov_len = bytes;
-		error = hammer2_write_file(nip, &auio, IO_APPEND, 0);
-		/* XXX handle error */
-		error = 0;
-#endif
+		aiov.iov_base = __DECONST(void *, ap->a_target);
+		aiov.iov_len = strlen(ap->a_target);
+		error = hammer2_write_file(nip, &auio, IO_APPEND);
 	}
 
 	/*
@@ -2050,14 +2265,14 @@ struct vop_vector hammer2_vnodeops = {
 	.vop_inactive		= hammer2_inactive,
 	.vop_reclaim		= hammer2_reclaim,
 	.vop_fsync		= hammer2_fsync,
-	//.vop_fdatasync	= vop_stdfdatasync_buf,
+	.vop_fdatasync		= vop_stdfdatasync_buf,
 	.vop_access		= hammer2_access,
 	.vop_getattr		= hammer2_getattr,
 	.vop_setattr		= hammer2_setattr,
 	.vop_readdir		= hammer2_readdir,
 	.vop_readlink		= hammer2_readlink,
 	.vop_read		= hammer2_read,
-	.vop_write		= VOP_EOPNOTSUPP,
+	.vop_write		= hammer2_write,
 	.vop_bmap		= hammer2_bmap,
 	.vop_cachedlookup	= hammer2_nresolve,
 	.vop_lookup		= vfs_cache_lookup,

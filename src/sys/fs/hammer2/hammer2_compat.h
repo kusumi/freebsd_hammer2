@@ -50,9 +50,9 @@
 	"assertion \"%s\" failed in %s at %s:%u", \
 	#exp, __func__, __FILE__, __LINE__)
 
-#define cpu_pause	cpu_spinwait
+#define cpu_pause()	cpu_spinwait()
 
-#define cpu_ccfence	__compiler_membar
+#define cpu_ccfence()	__compiler_membar()
 
 #define getticks()	(ticks)
 
