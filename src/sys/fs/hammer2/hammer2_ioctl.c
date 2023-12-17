@@ -518,9 +518,9 @@ hammer2_ioctl_pfs_snapshot(hammer2_inode_t *ip, void *data)
 		/* XXX hack blockset copy */
 		/* XXX doesn't work with real cluster */
 		wipdata->meta = nip->meta;
-		hammer2_spin_ex(&pmp->inum_spin);
+		hammer2_spin_ex(&pmp->blockset_spin);
 		wipdata->u.blockset = pmp->pfs_iroot_blocksets[0];
-		hammer2_spin_unex(&pmp->inum_spin);
+		hammer2_spin_unex(&pmp->blockset_spin);
 
 		KKASSERT(wipdata == &nchain->data->ipdata);
 
@@ -889,8 +889,8 @@ hammer2_ioctl_growfs(hammer2_inode_t *ip, void *data)
 
 	/* Get media size. */
 	cp = hmp->devvp->v_bufobj.bo_private;
-	KASSERT(cp, ("NULL GEOM consumer"));
-	KASSERT(cp->provider, ("NULL GEOM provider"));
+	KASSERTMSG(cp, "NULL GEOM consumer");
+	KASSERTMSG(cp->provider, "NULL GEOM provider");
 
 	size = cp->provider->mediasize;
 	hprintf("growfs partition-auto to %016jx\n", (intmax_t)size);

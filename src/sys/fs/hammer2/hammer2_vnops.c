@@ -49,7 +49,7 @@
 #include <vm/vnode_pager.h>
 
 static void hammer2_truncate_file(hammer2_inode_t *, hammer2_key_t);
-static void hammer2_extend_file(hammer2_inode_t *, hammer2_key_t);
+static void hammer2_extend_file(hammer2_inode_t *, hammer2_key_t, int);
 
 static int
 hammer2_inactive(struct vop_inactive_args *ap)
@@ -407,7 +407,7 @@ hammer2_setattr(struct vop_setattr_args *ap)
 				hammer2_truncate_file(ip, vap->va_size);
 				hammer2_mtx_unlock(&ip->truncate_lock);
 			} else {
-				hammer2_extend_file(ip, vap->va_size);
+				hammer2_extend_file(ip, vap->va_size, 0);
 			}
 			hammer2_inode_modify(ip);
 			ip->meta.mtime = ctime;
@@ -555,7 +555,7 @@ hammer2_readdir(struct vop_readdir_args *ap)
 		ncookies = uio->uio_resid / 16 + 1;
 		if (ncookies > 1024)
 			ncookies = 1024;
-		cookies = malloc(ncookies * sizeof(off_t), M_TEMP, M_WAITOK);
+		cookies = hmalloc(ncookies * sizeof(off_t), M_TEMP, M_WAITOK);
 	} else {
 		ncookies = -1;
 		cookies = NULL;
@@ -675,7 +675,7 @@ done:
 
 	if (error && cookie_index == 0) {
 		if (cookies) {
-			free(cookies, M_TEMP);
+			hfree(cookies, M_TEMP, ncookies * sizeof(off_t));
 			*ap->a_ncookies = 0;
 			*ap->a_cookies = NULL;
 		}
@@ -802,14 +802,16 @@ hammer2_write_file(hammer2_inode_t *ip, struct uio *uio, int ioflag)
 	daddr_t lbn;
 	size_t n;
 	int lblksize, loff, trivial, endofblk;
-	int modified = 0, seqcount = 0, error = 0;
+	int modified = 0, /*seqcount = 0,*/ error = 0;
 
 	KKASSERT(uio->uio_rw == UIO_WRITE);
 	KKASSERT(uio->uio_offset >= 0);
 	KKASSERT(uio->uio_resid >= 0);
 
+	/*
 	if (ioflag)
 		seqcount = ioflag >> IO_SEQSHIFT;
+	*/
 
 	error = vn_rlimit_fsize(vp, uio, uio->uio_td);
 	if (error)
@@ -838,7 +840,7 @@ hammer2_write_file(hammer2_inode_t *ip, struct uio *uio, int ioflag)
 	if (uio->uio_offset + uio->uio_resid > old_eof) {
 		new_eof = uio->uio_offset + uio->uio_resid;
 		modified = 1;
-		hammer2_extend_file(ip, new_eof);
+		hammer2_extend_file(ip, new_eof, 1);
 	} else {
 		new_eof = old_eof;
 	}
@@ -943,18 +945,25 @@ hammer2_write_file(hammer2_inode_t *ip, struct uio *uio, int ioflag)
 		if (ioflag & IO_SYNC) {
 			(void)bwrite(bp);
 		} else if ((ioflag & IO_DIRECT) && endofblk) {
-			bp->b_flags |= B_CLUSTEROK;
+			/* bp->b_flags |= B_CLUSTEROK; */
 			bawrite(bp);
 		} else if ((ioflag & IO_ASYNC) || vm_page_count_severe() ||
 		    buf_dirty_count_severe()) {
-			bp->b_flags |= B_CLUSTEROK;
+			/* bp->b_flags |= B_CLUSTEROK; */
 			bawrite(bp);
 		} else if (vp->v_mount->mnt_flag & MNT_NOCLUSTERW) {
 			bdwrite(bp);
 		} else {
+#if 0
 			bp->b_flags |= B_CLUSTEROK;
-			cluster_write_vn(vp, &ip->clusterw, bp, new_eof,
-			    seqcount, 0);
+			if (hammer2_dedup_enable == 0) /* XXX2 */
+				cluster_write_vn(vp, &ip->clusterw, bp, new_eof,
+				    seqcount, 0);
+			else
+				bdwrite(bp);
+#else
+			bdwrite(bp);
+#endif
 		}
 	}
 
@@ -1077,7 +1086,7 @@ hammer2_truncate_file(hammer2_inode_t *ip, hammer2_key_t nsize)
  *	    of the inode DIRECTDATA mode if INODE_RESIZED is set.
  */
 static void
-hammer2_extend_file(hammer2_inode_t *ip, hammer2_key_t nsize)
+hammer2_extend_file(hammer2_inode_t *ip, hammer2_key_t nsize, int writing)
 {
 	hammer2_key_t osize;
 	struct buf *bp;
@@ -1121,7 +1130,8 @@ hammer2_extend_file(hammer2_inode_t *ip, hammer2_key_t nsize)
 	if (ip->vp)
 		vnode_pager_setsize(ip->vp, nsize);
 	hammer2_mtx_ex(&ip->lock);
-	cluster_init_vn(&ip->clusterw);
+	if (!writing)
+		cluster_init_vn(&ip->clusterw);
 }
 
 /*
@@ -1139,7 +1149,7 @@ hammer2_nop_bmap(struct vop_bmap_args *ap)
 	if (ap->a_bnp != NULL)
 		*ap->a_bnp = ap->a_bn;
 	if (ap->a_runp != NULL)
-		*ap->a_runp = 0;
+		*ap->a_runp = 0; /* XXX2 */
 	if (ap->a_runb != NULL)
 		*ap->a_runb = 0;
 
@@ -2258,6 +2268,32 @@ hammer2_getpages(struct vop_getpages_args *ap)
 	/* panic: vnode_pager_generic_getpages: sector size 65536 too large */
 	return (vnode_pager_generic_getpages(vp, ap->a_m, ap->a_count,
 	    ap->a_rbehind, ap->a_rahead, NULL, NULL));
+}
+
+/*
+ * Initialize the vnode associated with a new inode, handle aliased vnodes.
+ */
+int
+hammer2_vinit(struct mount *mp, struct vnode **vpp)
+{
+	struct vnode *vp = *vpp;
+	hammer2_inode_t *ip = VTOI(vp);
+
+	vp->v_type = hammer2_get_vtype(ip->meta.type);
+
+	/* Only unallocated inodes should be of type VNON. */
+	if (ip->meta.mode != 0 && vp->v_type == VNON)
+		return (EINVAL);
+
+	if (vp->v_type == VFIFO)
+		vp->v_op = &hammer2_fifoops;
+	KASSERTMSG(vp->v_op, "NULL vnode ops");
+
+	if (ip->meta.inum == 1)
+		vp->v_vflag |= VV_ROOT;
+	*vpp = vp;
+
+	return (0);
 }
 
 struct vop_vector hammer2_vnodeops = {

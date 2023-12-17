@@ -61,15 +61,14 @@ main(int argc, char **argv)
 	char fstype[] = "hammer2";
 	char canon_dev[MAXPATHLEN], canon_dir[MAXPATHLEN];
 	const char *errcause;
-	char *val, *p;
-	int ch, mntflags, iovlen = 0;
+	char *val, *p, **argp;
+	int ch, mntflags = 0, initflags = 0, iovlen = 0;
 
 	setprogname(argv[0]);
 
 	memset(&args, 0, sizeof(args));
-	mntflags = 0;
 	optind = optreset = 1; /* Reset for parse of new argv. */
-	while ((ch = getopt(argc, argv, "o:")) != -1) {
+	while ((ch = getopt(argc, argv, "o:u")) != -1) {
 		switch (ch) {
 		case 'o':
 			getmntopts(optarg, mopts, &mntflags, &args.hflags);
@@ -81,6 +80,9 @@ main(int argc, char **argv)
 			}
 			build_iovec(&iov, &iovlen, optarg, val, (size_t)-1);
 			break;
+		case 'u':
+			initflags |= MNT_UPDATE;
+			break;
 		case '?':
 		default:
 			usage("unknown option: -%c", ch);
@@ -89,6 +91,17 @@ main(int argc, char **argv)
 	}
 	argc -= optind;
 	argv += optind;
+	argp = argv;
+	mntflags |= initflags;
+
+	/* Only the mount point need be specified in update mode. */
+	if (initflags & MNT_UPDATE) {
+		if (argc != 1) {
+			usage("missing parameter (node)");
+			/* not reached */
+		}
+		goto ignore_special;
+	}
 
 	if (argc != 2) {
 		usage("missing parameter(s) (special[@label] node)");
@@ -96,12 +109,8 @@ main(int argc, char **argv)
 	}
 
 	/* Remove unnecessary slashes from the device path if any. */
-	strlcpy(canon_dev, argv[0], MAXPATHLEN);
+	strlcpy(canon_dev, *argp, MAXPATHLEN);
 	rmslashes(canon_dev, canon_dev);
-
-	/* Resolve the mountpoint with realpath(3). */
-	if (checkpath(argv[1], canon_dir) != 0)
-		err(1, "%s", argv[1]);
 
 	/* Automatically add @DATA if no label specified. */
 	if (strchr(canon_dev, '@') == NULL) {
@@ -121,6 +130,11 @@ main(int argc, char **argv)
 	}
 
 	args.fspec = canon_dev;
+	argp++;
+ignore_special:
+	/* Resolve the mountpoint with realpath(3). */
+	if (checkpath(*argp, canon_dir) != 0)
+		err(1, "%s", *argp);
 
 	build_iovec(&iov, &iovlen, "fstype", fstype, (size_t)-1);
 	build_iovec(&iov, &iovlen, "fspath", canon_dir, (size_t)-1);
@@ -151,6 +165,7 @@ usage(const char *ctl, ...)
 	fprintf(stderr, "\n");
 	fprintf(stderr, " mount_hammer2 [-o options] special[@label] node\n");
 	fprintf(stderr, " mount_hammer2 [-o options] @label node\n");
+	fprintf(stderr, " mount_hammer2 -u [-o options] node\n");
 	fprintf(stderr, "\n");
 	fprintf(stderr, "options:\n"
 			" <standard_mount_options>\n"

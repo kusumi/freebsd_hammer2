@@ -42,8 +42,15 @@
 #include <sys/systm.h>
 #include <sys/proc.h>
 #include <sys/sx.h>
+#include <sys/malloc.h>
 #include <sys/buf.h>
 #include <sys/vnode.h>
+
+#include <vm/uma.h>
+
+#include <machine/atomic.h>
+
+#include "hammer2_compat.h"
 
 /* See FreeBSD src 7e1d3eefd410ca0fbae5a217422821244c3eeee4 */
 #define FREEBSD_NDINIT_ARGUMENT 1400043
@@ -59,7 +66,7 @@
 #include <sys/kdb.h>
 #define print_backtrace()	kdb_backtrace()
 #else
-#define print_backtrace()	do { } while (0)
+#define print_backtrace()	do {} while (0)
 #endif
 
 #ifdef INVARIANTS
@@ -78,7 +85,7 @@
 #ifdef INVARIANTS
 #define debug_hprintf	hprintf
 #else
-#define debug_hprintf(X, ...)	do { } while (0)
+#define debug_hprintf(X, ...)	do {} while (0)
 #endif
 
 /* hammer2_lk is lockmgr(9) in DragonFly. */
@@ -201,6 +208,122 @@ typedef struct sx hammer2_spin_t;
 #define hammer2_spin_assert_sh(p)	sx_assert(p, SA_SLOCKED)
 #define hammer2_spin_assert_locked(p)	sx_assert(p, SA_LOCKED)
 #define hammer2_spin_assert_unlocked(p)	sx_assert(p, SA_UNLOCKED)
+
+MALLOC_DECLARE(M_HAMMER2);
+MALLOC_DECLARE(C_HASHTABLE);
+extern uma_zone_t hammer2_zone_inode;
+extern uma_zone_t hammer2_zone_xops;
+extern uma_zone_t hammer2_zone_rbuf;
+extern uma_zone_t hammer2_zone_wbuf;
+
+extern int malloc_leak_m_hammer2;
+extern int malloc_leak_m_hammer2_lz4;
+extern int malloc_leak_m_temp;
+
+#ifdef HAMMER2_MALLOC
+static __inline void
+adjust_malloc_leak(int delta, struct malloc_type *type)
+{
+	int *lp;
+
+	if (type == M_HAMMER2)
+		lp = &malloc_leak_m_hammer2;
+	else if (type == C_HASHTABLE)
+		lp = &malloc_leak_m_hammer2_lz4;
+	else if (type == M_TEMP)
+		lp = &malloc_leak_m_temp;
+	else
+		hpanic("bad malloc type");
+	atomic_add_int(lp, delta);
+}
+
+static __inline void *
+hmalloc(size_t size, struct malloc_type *type, int flags)
+{
+	void *addr;
+
+	flags &= ~M_WAITOK;
+	flags |= M_NOWAIT;
+
+	addr = malloc(size, type, flags);
+	KASSERTMSG(addr, "size %ld flags %x malloc_leak %d,%d,%d",
+	    (long)size, flags,
+	    malloc_leak_m_hammer2,
+	    malloc_leak_m_hammer2_lz4,
+	    malloc_leak_m_temp);
+	if (addr) {
+		KKASSERT(size > 0);
+		adjust_malloc_leak(size, type);
+	}
+
+	return (addr);
+}
+
+static __inline void *
+hrealloc(void *addr, size_t size, struct malloc_type *type, int flags)
+{
+	flags &= ~M_WAITOK;
+	flags |= M_NOWAIT;
+
+	addr = realloc(addr, size, type, flags);
+	KASSERTMSG(addr, "size %ld flags %x malloc_leak %d,%d,%d",
+	    (long)size, flags,
+	    malloc_leak_m_hammer2,
+	    malloc_leak_m_hammer2_lz4,
+	    malloc_leak_m_temp);
+	if (addr) {
+		KKASSERT(size > 0);
+		adjust_malloc_leak(size, type);
+	}
+
+	return (addr);
+}
+
+/* OpenBSD style free(9) with 3 arguments */
+static __inline void
+hfree(void *addr, struct malloc_type *type, size_t freedsize)
+{
+	if (addr) {
+		KKASSERT(freedsize > 0);
+		adjust_malloc_leak(-(int)freedsize, type);
+	}
+	free(addr, type);
+}
+
+static __inline char *
+hstrdup(const char *str)
+{
+	size_t len;
+	char *copy;
+
+	len = strlen(str) + 1;
+	copy = hmalloc(len, M_TEMP, M_NOWAIT);
+	if (copy == NULL)
+		return (NULL);
+	bcopy(str, copy, len);
+
+	return (copy);
+}
+
+static __inline void
+hstrfree(char *str)
+{
+	hfree(str, M_TEMP, strlen(str) + 1);
+}
+#else
+static __inline void
+adjust_malloc_leak(int delta __unused, struct malloc_type *type __unused)
+{
+}
+#define hmalloc(size, type, flags)		malloc(size, type, flags)
+#define hrealloc(addr, size, type, flags)	realloc(addr, size, type, flags)
+#define hfree(addr, type, freedsize)		free(addr, type)
+#define hstrdup(str)				strdup(str, M_TEMP)
+#define hstrfree(str)				free(str, M_TEMP)
+#endif
+
+extern struct vop_vector hammer2_vnodeops;
+extern struct vop_vector hammer2_fifoops;
 
 /* cluster_write() interface has changed in FreeBSD 14.x. */
 #if __FreeBSD_version >= FREEBSD_CLUSTERW_STRUCTURE

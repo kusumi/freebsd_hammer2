@@ -56,7 +56,4 @@
 
 #define getticks()	(ticks)
 
-#define kstrdup(s)	strdup(s, M_TEMP)
-#define kstrfree(s)	free(s, M_TEMP)
-
 #endif /* !_FS_HAMMER2_COMPAT_H_ */
