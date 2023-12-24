@@ -210,7 +210,7 @@ typedef struct sx hammer2_spin_t;
 #define hammer2_spin_assert_unlocked(p)	sx_assert(p, SA_UNLOCKED)
 
 MALLOC_DECLARE(M_HAMMER2);
-MALLOC_DECLARE(C_HASHTABLE);
+MALLOC_DECLARE(M_HAMMER2_LZ4);
 extern uma_zone_t hammer2_zone_inode;
 extern uma_zone_t hammer2_zone_xops;
 extern uma_zone_t hammer2_zone_rbuf;
@@ -228,7 +228,7 @@ adjust_malloc_leak(int delta, struct malloc_type *type)
 
 	if (type == M_HAMMER2)
 		lp = &malloc_leak_m_hammer2;
-	else if (type == C_HASHTABLE)
+	else if (type == M_HAMMER2_LZ4)
 		lp = &malloc_leak_m_hammer2_lz4;
 	else if (type == M_TEMP)
 		lp = &malloc_leak_m_temp;
@@ -349,4 +349,5 @@ cluster_write_vn(struct vnode *vp, struct vn_clusterw *vnc __unused,
 	cluster_write(vp, bp, filesize, seqcount, gbflags);
 }
 #endif
+
 #endif /* !_FS_HAMMER2_OS_H_ */

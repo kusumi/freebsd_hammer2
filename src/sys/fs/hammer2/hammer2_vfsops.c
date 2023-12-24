@@ -73,14 +73,14 @@ int hammer2_cluster_meta_read = 1; /* for physical read-ahead */
 int hammer2_cluster_data_read = 4; /* for physical read-ahead */
 int hammer2_cluster_write; /* for physical write clustering */
 int hammer2_dedup_enable = 1;
-long hammer2_count_inode_allocated;
-long hammer2_count_chain_allocated;
-long hammer2_count_chain_modified;
-long hammer2_count_dio_allocated;
+int hammer2_count_inode_allocated;
+int hammer2_count_chain_allocated;
+int hammer2_count_chain_modified;
+int hammer2_count_dio_allocated;
 int hammer2_dio_limit = 256;
 int hammer2_bulkfree_tps = 5000;
 int hammer2_limit_scan_depth;
-long hammer2_limit_saved_chains;
+int hammer2_limit_saved_chains;
 int hammer2_always_compress;
 
 /* not sysctl */
@@ -99,13 +99,13 @@ SYSCTL_INT(_vfs_hammer2, OID_AUTO, cluster_write, CTLFLAG_RW,
     &hammer2_cluster_write, 0, "Cluster write count for device vnode");
 SYSCTL_INT(_vfs_hammer2, OID_AUTO, dedup_enable, CTLFLAG_RW,
     &hammer2_dedup_enable, 0, "Enable dedup");
-SYSCTL_LONG(_vfs_hammer2, OID_AUTO, inode_allocated, CTLFLAG_RD,
+SYSCTL_INT(_vfs_hammer2, OID_AUTO, inode_allocated, CTLFLAG_RD,
     &hammer2_count_inode_allocated, 0, "Number of inode allocated");
-SYSCTL_LONG(_vfs_hammer2, OID_AUTO, chain_allocated, CTLFLAG_RD,
+SYSCTL_INT(_vfs_hammer2, OID_AUTO, chain_allocated, CTLFLAG_RD,
     &hammer2_count_chain_allocated, 0, "Number of chain allocated");
-SYSCTL_LONG(_vfs_hammer2, OID_AUTO, chain_modified, CTLFLAG_RD,
+SYSCTL_INT(_vfs_hammer2, OID_AUTO, chain_modified, CTLFLAG_RD,
     &hammer2_count_chain_modified, 0, "Number of chain modified");
-SYSCTL_LONG(_vfs_hammer2, OID_AUTO, dio_allocated, CTLFLAG_RD,
+SYSCTL_INT(_vfs_hammer2, OID_AUTO, dio_allocated, CTLFLAG_RD,
     &hammer2_count_dio_allocated, 0, "Number of dio allocated");
 SYSCTL_INT(_vfs_hammer2, OID_AUTO, dio_limit, CTLFLAG_RW,
     &hammer2_dio_limit, 0, "Number of dio to keep for reuse");
@@ -113,7 +113,7 @@ SYSCTL_INT(_vfs_hammer2, OID_AUTO, bulkfree_tps, CTLFLAG_RW,
     &hammer2_bulkfree_tps, 0, "Bulkfree maximum scan rate");
 SYSCTL_INT(_vfs_hammer2, OID_AUTO, limit_scan_depth, CTLFLAG_RW,
     &hammer2_limit_scan_depth, 0, "Bulkfree scan depth limit");
-SYSCTL_LONG(_vfs_hammer2, OID_AUTO, limit_saved_chains, CTLFLAG_RW,
+SYSCTL_INT(_vfs_hammer2, OID_AUTO, limit_saved_chains, CTLFLAG_RW,
     &hammer2_limit_saved_chains, 0, "Bulkfree saved chains limit");
 SYSCTL_INT(_vfs_hammer2, OID_AUTO, always_compress, CTLFLAG_RW,
     &hammer2_always_compress, 0, "Always try to compress write buffer");
@@ -129,26 +129,26 @@ hammer2_assert_clean(void)
 	int error = 0;
 
 	if (hammer2_count_inode_allocated > 0) {
-		hprintf("%ld inode left\n", hammer2_count_inode_allocated);
+		hprintf("%d inode left\n", hammer2_count_inode_allocated);
 		error = EINVAL;
 	}
 	KKASSERT(hammer2_count_inode_allocated == 0);
 
 	if (hammer2_count_chain_allocated > 0) {
-		hprintf("%ld chain left\n", hammer2_count_chain_allocated);
+		hprintf("%d chain left\n", hammer2_count_chain_allocated);
 		error = EINVAL;
 	}
 	KKASSERT(hammer2_count_chain_allocated == 0);
 
 	if (hammer2_count_chain_modified > 0) {
-		hprintf("%ld modified chain left\n",
+		hprintf("%d modified chain left\n",
 		    hammer2_count_chain_modified);
 		error = EINVAL;
 	}
 	KKASSERT(hammer2_count_chain_modified == 0);
 
 	if (hammer2_count_dio_allocated > 0) {
-		hprintf("%ld dio left\n", hammer2_count_dio_allocated);
+		hprintf("%d dio left\n", hammer2_count_dio_allocated);
 		error = EINVAL;
 	}
 	KKASSERT(hammer2_count_dio_allocated == 0);
@@ -423,8 +423,8 @@ hammer2_pfsfree(hammer2_pfs_t *pmp)
 				chains_still_present = 1;
 		}
 		KASSERTMSG(iroot->refs == 1,
-		    "iroot inum %016jx refs %d not 1",
-		    (intmax_t)iroot->meta.inum, iroot->refs);
+		    "iroot inum %016llx refs %d not 1",
+		    (long long)iroot->meta.inum, iroot->refs);
 		hammer2_inode_drop(iroot);
 		pmp->iroot = NULL;
 	}
@@ -1264,14 +1264,14 @@ again:
 	 * of these chains.
 	 */
 	if (hmp->vchain.flags & HAMMER2_CHAIN_MODIFIED) {
-		atomic_add_long(&hammer2_count_chain_modified, -1);
+		atomic_add_int(&hammer2_count_chain_modified, -1);
 		atomic_clear_int(&hmp->vchain.flags, HAMMER2_CHAIN_MODIFIED);
 	}
 	if (hmp->vchain.flags & HAMMER2_CHAIN_UPDATE)
 		atomic_clear_int(&hmp->vchain.flags, HAMMER2_CHAIN_UPDATE);
 
 	if (hmp->fchain.flags & HAMMER2_CHAIN_MODIFIED) {
-		atomic_add_long(&hammer2_count_chain_modified, -1);
+		atomic_add_int(&hammer2_count_chain_modified, -1);
 		atomic_clear_int(&hmp->fchain.flags, HAMMER2_CHAIN_MODIFIED);
 	}
 	if (hmp->fchain.flags & HAMMER2_CHAIN_UPDATE)
@@ -1315,7 +1315,7 @@ again:
 			hprintf("XXX M_HAMMER2 %d bytes leaked\n",
 			    malloc_leak_m_hammer2);
 		if (malloc_leak_m_hammer2_lz4)
-			hprintf("XXX C_HASHTABLE %d bytes leaked\n",
+			hprintf("XXX M_HAMMER2_LZ4 %d bytes leaked\n",
 			    malloc_leak_m_hammer2_lz4);
 		if (malloc_leak_m_temp)
 			hprintf("XXX M_TEMP %d bytes leaked\n",
@@ -1367,8 +1367,8 @@ hammer2_recovery(hammer2_dev_t *hmp)
 	if (sync_tid >= mirror_tid)
 		debug_hprintf("no recovery needed\n");
 	else
-		hprintf("freemap recovery %016jx-%016jx\n",
-		    sync_tid + 1, mirror_tid);
+		hprintf("freemap recovery %016llx-%016llx\n",
+		    (long long)sync_tid + 1, (long long)mirror_tid);
 
 	TAILQ_INIT(&info.list);
 	info.depth = 0;
@@ -1801,8 +1801,8 @@ restart:
 				 */
 				vp = NULL;
 				dorestart |= 1;
-				debug_hprintf("inum %016jx vget failed\n",
-				    (intmax_t)ip->meta.inum);
+				debug_hprintf("inum %016llx vget failed\n",
+				    (long long)ip->meta.inum);
 				hammer2_inode_delayed_sideq(ip);
 
 				hammer2_mtx_unlock(&ip->lock);
@@ -1846,8 +1846,8 @@ restart:
 		if (vp) {
 			error = vn_fsync_buf(vp, MNT_WAIT); /* vop_stdfsync() */
 			if (error) {
-				hprintf("inum %016jx vnode flush failed %d\n",
-				    (intmax_t)ip->meta.inum, error);
+				hprintf("inum %016llx vnode flush failed %d\n",
+				    (long long)ip->meta.inum, error);
 				error = 0; /* XXX */
 			}
 		}
@@ -1858,12 +1858,12 @@ restart:
 		 * update the parent.
 		 */
 		if (ip->flags & HAMMER2_INODE_DELETING) {
-			debug_hprintf("inum %016jx destroy\n",
-			    (intmax_t)ip->meta.inum);
+			debug_hprintf("inum %016llx destroy\n",
+			    (long long)ip->meta.inum);
 			hammer2_inode_chain_des(ip);
 		} else if (ip->flags & HAMMER2_INODE_CREATING) {
-			debug_hprintf("inum %016jx insert\n",
-			    (intmax_t)ip->meta.inum);
+			debug_hprintf("inum %016llx insert\n",
+			    (long long)ip->meta.inum);
 			hammer2_inode_chain_ins(ip);
 		}
 
@@ -1882,8 +1882,8 @@ restart:
 		 * XXX at the moment this will likely result in a double-flush
 		 * of the iroot chain.
 		 */
-		debug_hprintf("inum %016jx pinum %016jx chain-sync\n",
-		    (intmax_t)ip->meta.inum, (intmax_t)ip->meta.iparent);
+		debug_hprintf("inum %016llx pinum %016llx chain-sync\n",
+		    (long long)ip->meta.inum, (long long)ip->meta.iparent);
 		hammer2_inode_chain_sync(ip);
 
 		if (ip == pmp->iroot)
@@ -2037,8 +2037,9 @@ hammer2_root(struct mount *mp, int flags, struct vnode **vpp)
 				pmp->inode_tid = HAMMER2_INODE_START;
 			pmp->modify_tid =
 			    xop->head.cluster.focus->bref.modify_tid + 1;
-			debug_hprintf("PFS nextino %016jx mod %016jx\n",
-			    (intmax_t)pmp->inode_tid, (intmax_t)pmp->modify_tid);
+			debug_hprintf("PFS nextino %016llx mod %016llx\n",
+			    (long long)pmp->inode_tid,
+			    (long long)pmp->modify_tid);
 
 			wakeup(&pmp->iroot);
 			hammer2_xop_retire(&xop->head, HAMMER2_XOPMASK_VOP);
@@ -2175,7 +2176,7 @@ void
 hammer2_voldata_modify(hammer2_dev_t *hmp)
 {
 	if ((hmp->vchain.flags & HAMMER2_CHAIN_MODIFIED) == 0) {
-		atomic_add_long(&hammer2_count_chain_modified, 1);
+		atomic_add_int(&hammer2_count_chain_modified, 1);
 		atomic_set_int(&hmp->vchain.flags, HAMMER2_CHAIN_MODIFIED);
 		hmp->vchain.bref.mirror_tid = hmp->voldata.mirror_tid + 1;
 	}

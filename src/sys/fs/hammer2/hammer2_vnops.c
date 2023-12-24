@@ -37,6 +37,7 @@
 
 #include "hammer2.h"
 
+#include <sys/limits.h>
 #include <sys/dirent.h>
 #include <sys/namei.h>
 #include <sys/uio.h>
@@ -125,8 +126,8 @@ hammer2_reclaim(struct vop_reclaim_args *ap)
 	    HAMMER2_INODE_ISUNLINKED) {
 		atomic_set_int(&ip->flags, HAMMER2_INODE_DELETING);
 		hammer2_inode_delayed_sideq(ip);
-		hprintf("inum %016jx unlinked but not disposed\n",
-		    (intmax_t)ip->meta.inum);
+		hprintf("inum %016llx unlinked but not disposed\n",
+		    (long long)ip->meta.inum);
 	}
 	hammer2_inode_unlock(ip);
 
@@ -2141,7 +2142,7 @@ hammer2_print(struct vop_print_args *ap)
 	hammer2_inode_t *ip = VTOI(vp);
 	hammer2_dev_t *hmp = ip->pmp->pfs_hmps[0];
 
-	vn_printf(hmp->devvp, "\tino %ju", (uintmax_t)ip->meta.inum);
+	vn_printf(hmp->devvp, "\tino %016llx", (long long)ip->meta.inum);
 	if (vp->v_type == VFIFO)
 		fifo_printinfo(vp);
 	printf("\n");

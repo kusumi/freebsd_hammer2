@@ -520,8 +520,8 @@ hammer2_inode_drop_assert(hammer2_inode_t *ip)
 
 	refs = hammer2_mtx_refs(&ip->lock);
 	if (refs) {
-		hprintf("XXX inum %016jx mtx_refs %d mtx_owned %d\n",
-		    (intmax_t)ip->meta.inum, refs,
+		hprintf("XXX inum %016llx mtx_refs %d mtx_owned %d\n",
+		    (long long)ip->meta.inum, refs,
 		    hammer2_mtx_owned(&ip->lock));
 		print_backtrace();
 		KKASSERT(ip->meta.inum == 1); /* XXX2 */
@@ -582,7 +582,7 @@ hammer2_inode_drop(hammer2_inode_t *ip)
 				/* ip->vhold isn't necessarily zero. */
 
 				uma_zfree(hammer2_zone_inode, ip);
-				atomic_add_long(&hammer2_count_inode_allocated,
+				atomic_add_int(&hammer2_count_inode_allocated,
 				    -1);
 				ip = NULL; /* Will terminate loop. */
 			} else {
@@ -751,7 +751,7 @@ again:
 	 * insert it, handle insertion races.
 	 */
 	nip = uma_zalloc(hammer2_zone_inode, M_WAITOK | M_ZERO);
-	atomic_add_long(&hammer2_count_inode_allocated, 1);
+	atomic_add_int(&hammer2_count_inode_allocated, 1);
 	hammer2_spin_init(&nip->cluster_spin, "h2ip_clsp");
 
 	nip->cluster.pmp = pmp;
@@ -1504,8 +1504,8 @@ hammer2_inode_chain_sync(hammer2_inode_t *ip)
 		if (error == HAMMER2_ERROR_ENOENT)
 			error = 0;
 		if (error) {
-			hprintf("unable to fsync inode %016jx\n",
-			    (intmax_t)ip->meta.inum);
+			hprintf("unable to fsync inode %016llx\n",
+			    (long long)ip->meta.inum);
 			/* XXX return error somehow? */
 		}
 	}
@@ -1534,8 +1534,8 @@ hammer2_inode_chain_ins(hammer2_inode_t *ip)
 		if (error == HAMMER2_ERROR_ENOENT)
 			error = 0;
 		if (error) {
-			hprintf("backend unable to insert inum %016jx\n",
-			    (intmax_t)ip->meta.inum);
+			hprintf("backend unable to insert inum %016llx\n",
+			    (long long)ip->meta.inum);
 			/* XXX return error somehow? */
 		}
 	}
@@ -1570,8 +1570,8 @@ hammer2_inode_chain_des(hammer2_inode_t *ip)
 		if (error == HAMMER2_ERROR_ENOENT)
 			error = 0;
 		if (error) {
-			hprintf("backend unable to delete inode %016jx\n",
-			    (intmax_t)ip->meta.inum);
+			hprintf("backend unable to delete inode %016llx\n",
+			    (long long)ip->meta.inum);
 			/* XXX return error somehow? */
 		}
 	}

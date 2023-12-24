@@ -66,7 +66,6 @@
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
-#include <sys/limits.h>
 #include <sys/errno.h>
 #include <sys/buf.h>
 #include <sys/mount.h>
@@ -915,14 +914,14 @@ extern int hammer2_cluster_meta_read;
 extern int hammer2_cluster_data_read;
 extern int hammer2_cluster_write;
 extern int hammer2_dedup_enable;
-extern long hammer2_count_inode_allocated;
-extern long hammer2_count_chain_allocated;
-extern long hammer2_count_chain_modified;
-extern long hammer2_count_dio_allocated;
+extern int hammer2_count_inode_allocated;
+extern int hammer2_count_chain_allocated;
+extern int hammer2_count_chain_modified;
+extern int hammer2_count_dio_allocated;
 extern int hammer2_dio_limit;
 extern int hammer2_bulkfree_tps;
 extern int hammer2_limit_scan_depth;
-extern long hammer2_limit_saved_chains;
+extern int hammer2_limit_saved_chains;
 extern int hammer2_always_compress;
 
 extern hammer2_xop_desc_t hammer2_ipcluster_desc;
