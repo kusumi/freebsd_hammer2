@@ -91,20 +91,65 @@
 /* hammer2_lk is lockmgr(9) in DragonFly. */
 typedef struct sx hammer2_lk_t;
 
-#define hammer2_lk_init(p, s)		sx_init(p, s)
-#define hammer2_lk_ex(p)		sx_xlock(p)
-#define hammer2_lk_unlock(p)		sx_unlock(p)
-#define hammer2_lk_destroy(p)		sx_destroy(p)
+static __inline void
+hammer2_lk_init(hammer2_lk_t *p, const char *s)
+{
+	sx_init(p, s);
+}
 
-#define hammer2_lk_assert_ex(p)		sx_assert(p, SA_XLOCKED)
-#define hammer2_lk_assert_unlocked(p)	sx_assert(p, SA_UNLOCKED)
+static __inline void
+hammer2_lk_ex(hammer2_lk_t *p)
+{
+	sx_xlock(p);
+}
+
+static __inline void
+hammer2_lk_unlock(hammer2_lk_t *p)
+{
+	sx_unlock(p);
+}
+
+static __inline void
+hammer2_lk_destroy(hammer2_lk_t *p)
+{
+	sx_destroy(p);
+}
+
+static __inline void
+hammer2_lk_assert_ex(hammer2_lk_t *p)
+{
+	sx_assert(p, SA_XLOCKED);
+}
+
+static __inline void
+hammer2_lk_assert_unlocked(hammer2_lk_t *p)
+{
+	sx_assert(p, SA_UNLOCKED);
+}
 
 typedef int hammer2_lkc_t;
 
-#define hammer2_lkc_init(c, s)		do {} while (0)
-#define hammer2_lkc_destroy(c)		do {} while (0)
-#define hammer2_lkc_sleep(c, p, s)	sx_sleep(c, p, 0, s, 0)
-#define hammer2_lkc_wakeup(c)		wakeup(c)
+static __inline void
+hammer2_lkc_init(hammer2_lkc_t *c __unused, const char *s __unused)
+{
+}
+
+static __inline void
+hammer2_lkc_destroy(hammer2_lkc_t *c __unused)
+{
+}
+
+static __inline void
+hammer2_lkc_sleep(hammer2_lkc_t *c, hammer2_lk_t *p, const char *s)
+{
+	sx_sleep(c, p, 0, s, 0);
+}
+
+static __inline void
+hammer2_lkc_wakeup(hammer2_lkc_t *c)
+{
+	wakeup(c);
+}
 
 /*
  * Mutex and spinlock shims.
@@ -117,28 +162,95 @@ struct sx_wrapper {
 };
 typedef struct sx_wrapper hammer2_mtx_t;
 
-#define hammer2_mtx_init(p, s)		\
-	do { bzero(p, sizeof(*(p))); sx_init(&(p)->lock, s); } while (0)
-#define hammer2_mtx_init_recurse(p, s)	\
-	do { bzero(p, sizeof(*(p))); sx_init_flags(&(p)->lock, s, SX_RECURSE); } while (0)
-#define hammer2_mtx_ex(p)		\
-	do { sx_xlock(&(p)->lock); (p)->refs++; } while (0)
-#define hammer2_mtx_sh(p)		\
-	do { sx_slock(&(p)->lock); (p)->refs++; } while (0)
-#define hammer2_mtx_unlock(p)		\
-	do { (p)->refs--; sx_unlock(&(p)->lock); } while (0)
-#define hammer2_mtx_refs(p)		((p)->refs)
-#define hammer2_mtx_destroy(p)		sx_destroy(&(p)->lock)
-#define hammer2_mtx_sleep(c, p, s)	sx_sleep(c, &(p)->lock, 0, s, 0)
-#define hammer2_mtx_wakeup(c)		wakeup(c)
+static __inline void
+hammer2_mtx_init(hammer2_mtx_t *p, const char *s)
+{
+	bzero(p, sizeof(*p));
+	sx_init(&p->lock, s);
+}
+
+static __inline void
+hammer2_mtx_init_recurse(hammer2_mtx_t *p, const char *s)
+{
+	bzero(p, sizeof(*p));
+	sx_init_flags(&p->lock, s, SX_RECURSE);
+}
+
+static __inline void
+hammer2_mtx_ex(hammer2_mtx_t *p)
+{
+	sx_xlock(&p->lock);
+	p->refs++;
+}
+
+static __inline void
+hammer2_mtx_sh(hammer2_mtx_t *p)
+{
+	sx_slock(&p->lock);
+	p->refs++;
+}
+
+static __inline void
+hammer2_mtx_unlock(hammer2_mtx_t *p)
+{
+	p->refs--;
+	sx_unlock(&p->lock);
+}
+
+static __inline int
+hammer2_mtx_refs(hammer2_mtx_t *p)
+{
+	return (p->refs);
+}
+
+static __inline void
+hammer2_mtx_destroy(hammer2_mtx_t *p)
+{
+	sx_destroy(&p->lock);
+}
+
+static __inline void
+hammer2_mtx_sleep(hammer2_lkc_t *c, hammer2_mtx_t *p, const char *s)
+{
+	sx_sleep(c, &p->lock, 0, s, 0);
+}
+
+static __inline void
+hammer2_mtx_wakeup(hammer2_lkc_t *c)
+{
+	wakeup(c);
+}
 
 /* Non-zero if exclusively locked by the calling thread. */
-#define hammer2_mtx_owned(p)		sx_xlocked(&(p)->lock)
+static __inline int
+hammer2_mtx_owned(hammer2_mtx_t *p)
+{
+	return (sx_xlocked(&p->lock));
+}
 
-#define hammer2_mtx_assert_ex(p)	sx_assert(&(p)->lock, SA_XLOCKED)
-#define hammer2_mtx_assert_sh(p)	sx_assert(&(p)->lock, SA_SLOCKED)
-#define hammer2_mtx_assert_locked(p)	sx_assert(&(p)->lock, SA_LOCKED)
-#define hammer2_mtx_assert_unlocked(p)	sx_assert(&(p)->lock, SA_UNLOCKED)
+static __inline void
+hammer2_mtx_assert_ex(hammer2_mtx_t *p)
+{
+	sx_assert(&p->lock, SA_XLOCKED);
+}
+
+static __inline void
+hammer2_mtx_assert_sh(hammer2_mtx_t *p)
+{
+	sx_assert(&p->lock, SA_SLOCKED);
+}
+
+static __inline void
+hammer2_mtx_assert_locked(hammer2_mtx_t *p)
+{
+	sx_assert(&p->lock, SA_LOCKED);
+}
+
+static __inline void
+hammer2_mtx_assert_unlocked(hammer2_mtx_t *p)
+{
+	sx_assert(&p->lock, SA_UNLOCKED);
+}
 
 static __inline int
 hammer2_mtx_ex_try(hammer2_mtx_t *p)
@@ -197,17 +309,65 @@ hammer2_mtx_temp_restore(hammer2_mtx_t *p, int x)
 
 typedef struct sx hammer2_spin_t;
 
-#define hammer2_spin_init(p, s)		sx_init(p, s)
-#define hammer2_spin_ex(p)		sx_xlock(p)
-#define hammer2_spin_sh(p)		sx_slock(p)
-#define hammer2_spin_unex(p)		sx_xunlock(p)
-#define hammer2_spin_unsh(p)		sx_sunlock(p)
-#define hammer2_spin_destroy(p)		sx_destroy(p)
+static __inline void
+hammer2_spin_init(hammer2_spin_t *p, const char *s)
+{
+	sx_init(p, s);
+}
 
-#define hammer2_spin_assert_ex(p)	sx_assert(p, SA_XLOCKED)
-#define hammer2_spin_assert_sh(p)	sx_assert(p, SA_SLOCKED)
-#define hammer2_spin_assert_locked(p)	sx_assert(p, SA_LOCKED)
-#define hammer2_spin_assert_unlocked(p)	sx_assert(p, SA_UNLOCKED)
+static __inline void
+hammer2_spin_ex(hammer2_spin_t *p)
+{
+	sx_xlock(p);
+}
+
+static __inline void
+hammer2_spin_sh(hammer2_spin_t *p)
+{
+	sx_slock(p);
+}
+
+static __inline void
+hammer2_spin_unex(hammer2_spin_t *p)
+{
+	sx_xunlock(p);
+}
+
+static __inline void
+hammer2_spin_unsh(hammer2_spin_t *p)
+{
+	sx_sunlock(p);
+}
+
+static __inline void
+hammer2_spin_destroy(hammer2_spin_t *p)
+{
+	sx_destroy(p);
+}
+
+static __inline void
+hammer2_spin_assert_ex(hammer2_spin_t *p)
+{
+	sx_assert(p, SA_XLOCKED);
+}
+
+static __inline void
+hammer2_spin_assert_sh(hammer2_spin_t *p)
+{
+	sx_assert(p, SA_SLOCKED);
+}
+
+static __inline void
+hammer2_spin_assert_locked(hammer2_spin_t *p)
+{
+	sx_assert(p, SA_LOCKED);
+}
+
+static __inline void
+hammer2_spin_assert_unlocked(hammer2_spin_t *p)
+{
+	sx_assert(p, SA_UNLOCKED);
+}
 
 MALLOC_DECLARE(M_HAMMER2);
 MALLOC_DECLARE(M_HAMMER2_LZ4);

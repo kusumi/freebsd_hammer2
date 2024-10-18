@@ -10,5 +10,3 @@
 /src/sbin/newfs_hammer2/newfs_hammer2
 /src/sbin/mount_hammer2/mount_hammer2
 /src/sbin/fsck_hammer2/fsck_hammer2
-
-/src/freebsd_hammer2.diff

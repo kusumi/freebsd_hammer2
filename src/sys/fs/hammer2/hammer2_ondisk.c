@@ -250,12 +250,29 @@ hammer2_cleanup_devvp(hammer2_devvp_list_t *devvpl)
 }
 
 static int
-hammer2_verify_volumes_common(const hammer2_volume_t *volumes)
+hammer2_verify_volumes_common(const hammer2_volume_t *volumes,
+			      const hammer2_volume_data_t *rootvoldata)
 {
 	const hammer2_volume_t *vol;
 	const struct g_consumer *cp;
 	const char *path;
+	char buf[64];
 	int i;
+	struct uuid uuid;
+
+	/* Check volume header. */
+	if (rootvoldata->volu_id != HAMMER2_ROOT_VOLUME) {
+		hprintf("volume id %d must be %d\n", rootvoldata->volu_id,
+		    HAMMER2_ROOT_VOLUME);
+		return (EINVAL);
+	}
+	uuid = rootvoldata->fstype;
+	snprintf_uuid(buf, sizeof(buf), &uuid); /* takes non-const uuid */
+	if (strcmp(buf, HAMMER2_UUID_STRING)) {
+		hprintf("volume fstype uuid %s must be %s\n", buf,
+		    HAMMER2_UUID_STRING);
+		return (EINVAL);
+	}
 
 	for (i = 0; i < HAMMER2_MAX_VOLUMES; ++i) {
 		vol = &volumes[i];
@@ -289,6 +306,10 @@ hammer2_verify_volumes_common(const hammer2_volume_t *volumes)
 			    (long long)cp->provider->mediasize);
 			return (EINVAL);
 		}
+		if (vol->size == 0) {
+			hprintf("%s has size of 0\n", path);
+			return (EINVAL);
+		}
 	}
 
 	return (0);
@@ -315,10 +336,6 @@ hammer2_verify_volumes_1(const hammer2_volume_t *volumes,
 	}
 
 	/* Check volume header. */
-	if (rootvoldata->volu_id) {
-		hprintf("volume id %d must be 0\n", rootvoldata->volu_id);
-		return (EINVAL);
-	}
 	if (rootvoldata->nvolumes) {
 		hprintf("volume count %d must be 0\n", rootvoldata->nvolumes);
 		return (EINVAL);
@@ -377,11 +394,6 @@ hammer2_verify_volumes_2(const hammer2_volume_t *volumes,
 	}
 
 	/* Check volume header. */
-	if (rootvoldata->volu_id != HAMMER2_ROOT_VOLUME) {
-		hprintf("volume id %d must be %d\n",
-		    rootvoldata->volu_id, HAMMER2_ROOT_VOLUME);
-		return (EINVAL);
-	}
 	if (rootvoldata->nvolumes != nvolumes) {
 		hprintf("volume header requires %d devices, %d specified\n",
 		    rootvoldata->nvolumes, nvolumes);
@@ -474,7 +486,7 @@ hammer2_verify_volumes(const hammer2_volume_t *volumes,
 {
 	int error;
 
-	error = hammer2_verify_volumes_common(volumes);
+	error = hammer2_verify_volumes_common(volumes, rootvoldata);
 	if (error)
 		return (error);
 
@@ -591,7 +603,7 @@ hammer2_print_uuid_mismatch(struct uuid *uuid1, struct uuid *uuid2,
 	snprintf_uuid(buf1, sizeof(buf1), uuid1);
 	snprintf_uuid(buf2, sizeof(buf2), uuid2);
 
-	hprintf("%s uuid mismatch %s vs %s\n", id, buf1, buf2);
+	hprintf("volume %s uuid mismatch %s vs %s\n", id, buf1, buf2);
 }
 
 int
