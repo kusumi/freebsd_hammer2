@@ -8,8 +8,11 @@ SRCS=	vnode_if.h \
 
 .PATH:	../../libkern
 
-.if defined(HAMMER2_INVARIANTS)
+.if defined(INVARIANTS)
 CFLAGS+=	-DINVARIANTS -DINVARIANT_SUPPORT
+.endif
+.if defined(HAMMER2_INVARIANTS)
+CFLAGS+=	-DHAMMER2_INVARIANTS
 .endif
 .if defined(HAMMER2_MALLOC)
 CFLAGS+=	-DHAMMER2_MALLOC

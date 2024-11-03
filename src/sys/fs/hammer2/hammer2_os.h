@@ -45,6 +45,7 @@
 #include <sys/malloc.h>
 #include <sys/buf.h>
 #include <sys/vnode.h>
+#include <sys/kdb.h>
 
 #include <vm/uma.h>
 
@@ -62,14 +63,9 @@
 /* See FreeBSD src b214fcceacad6b842545150664bd2695c1c2b34f */
 #define FREEBSD_READDIR_COOKIES_64 1400045
 
-#ifdef INVARIANTS
-#include <sys/kdb.h>
 #define print_backtrace()	kdb_backtrace()
-#else
-#define print_backtrace()	do {} while (0)
-#endif
 
-#ifdef INVARIANTS
+#ifdef HAMMER2_INVARIANTS
 #define HFMT	"%s(%s|%d): "
 #define HARGS	__func__, \
     curproc ? curproc->p_comm : "-", \
@@ -82,7 +78,7 @@
 #define hprintf(X, ...)	printf(HFMT X, HARGS, ## __VA_ARGS__)
 #define hpanic(X, ...)	panic(HFMT X, HARGS, ## __VA_ARGS__)
 
-#ifdef INVARIANTS
+#ifdef HAMMER2_INVARIANTS
 #define debug_hprintf	hprintf
 #else
 #define debug_hprintf(X, ...)	do {} while (0)
@@ -180,20 +176,20 @@ static __inline void
 hammer2_mtx_ex(hammer2_mtx_t *p)
 {
 	sx_xlock(&p->lock);
-	p->refs++;
+	atomic_add_int(&p->refs, 1);
 }
 
 static __inline void
 hammer2_mtx_sh(hammer2_mtx_t *p)
 {
 	sx_slock(&p->lock);
-	p->refs++;
+	atomic_add_int(&p->refs, 1);
 }
 
 static __inline void
 hammer2_mtx_unlock(hammer2_mtx_t *p)
 {
-	p->refs--;
+	atomic_add_int(&p->refs, -1);
 	sx_unlock(&p->lock);
 }
 
@@ -256,7 +252,7 @@ static __inline int
 hammer2_mtx_ex_try(hammer2_mtx_t *p)
 {
 	if (sx_try_xlock(&p->lock)) {
-		p->refs++;
+		atomic_add_int(&p->refs, 1);
 		return (0);
 	} else {
 		return (1);
@@ -267,7 +263,7 @@ static __inline int
 hammer2_mtx_sh_try(hammer2_mtx_t *p)
 {
 	if (sx_try_slock(&p->lock)) {
-		p->refs++;
+		atomic_add_int(&p->refs, 1);
 		return (0);
 	} else {
 		return (1);

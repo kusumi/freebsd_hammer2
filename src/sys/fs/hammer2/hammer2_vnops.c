@@ -752,7 +752,7 @@ hammer2_read_file(hammer2_inode_t *ip, struct uio *uio, int ioflag)
 			n = (int)(isize - uio->uio_offset);
 		error = uiomove(bp->b_data + loff, n, uio);
 		if (error) {
-			brelse(bp);
+			vfs_bio_brelse(bp, ioflag);
 			break;
 		}
 		vfs_bio_brelse(bp, ioflag);

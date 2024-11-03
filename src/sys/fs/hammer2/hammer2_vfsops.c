@@ -1277,7 +1277,7 @@ again:
 	if (hmp->fchain.flags & HAMMER2_CHAIN_UPDATE)
 		atomic_clear_int(&hmp->fchain.flags, HAMMER2_CHAIN_UPDATE);
 
-#ifdef INVARIANTS
+#ifdef HAMMER2_INVARIANTS
 	hammer2_dump_chain(&hmp->vchain, 0, 0, -1, 'v');
 	hammer2_dump_chain(&hmp->fchain, 0, 0, -1, 'f');
 #endif
