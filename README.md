@@ -3,7 +3,7 @@ FreeBSD [HAMMER2](https://gitweb.dragonflybsd.org/dragonfly.git/blob/HEAD:/sys/v
 
 ## Requirements
 
-+ FreeBSD 13.0 or above
++ FreeBSD 13.x / 14.x
 
 + src tree under /usr/src
 
