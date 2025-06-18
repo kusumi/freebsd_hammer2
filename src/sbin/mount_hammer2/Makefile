@@ -1,16 +1,14 @@
 .include <bsd.own.mk>
 
 PROG=	mount_hammer2
-SRCS=	mount_hammer2.c getmntopts.c
+SRCS=	mount_hammer2.c mntopts.c
 MAN=	mount_hammer2.8
+
+.PATH:	../../lib/libutil
 
 WARNS=	5
 
-SRCTOP?=	/usr/src # XXX
-
-CFLAGS+=	-I${SRCTOP}/sbin/mount
 CFLAGS+=	-I../../sys
-
-.PATH:		${SRCTOP}/sbin/mount
+CFLAGS+=	-I../../lib/libutil
 
 .include <bsd.prog.mk>

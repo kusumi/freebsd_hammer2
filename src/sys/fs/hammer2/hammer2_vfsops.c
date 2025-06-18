@@ -43,6 +43,7 @@
 static int hammer2_unmount(struct mount *, int);
 static int hammer2_recovery(hammer2_dev_t *);
 static int hammer2_fixup_pfses(hammer2_dev_t *);
+static int hammer2_remount_impl(hammer2_dev_t *);
 static int hammer2_remount(hammer2_dev_t *, struct mount *);
 static int hammer2_statfs(struct mount *, struct statfs *);
 static void hammer2_update_pmps(hammer2_dev_t *);
@@ -432,8 +433,7 @@ hammer2_pfsfree(hammer2_pfs_t *pmp)
 	/* Free remaining pmp resources. */
 	if (chains_still_present) {
 		KKASSERT(pmp->mp);
-		hprintf("PFS at %s still in use\n",
-		    pmp->mp->mnt_stat.f_mntonname);
+		hprintf("PFS still in use\n");
 	} else {
 		hammer2_spin_destroy(&pmp->blockset_spin);
 		hammer2_spin_destroy(&pmp->list_spin);
@@ -897,7 +897,7 @@ next_hmp:
 		spmp->iroot = hammer2_inode_get(spmp, xop, -1, -1);
 		spmp->spmp_hmp = hmp;
 		spmp->pfs_types[0] = ripdata->meta.pfs_type;
-		spmp->pfs_hmps[0] = hmp;
+		spmp->rdonly = rdonly;
 		hammer2_inode_ref(spmp->iroot);
 		hammer2_inode_unlock(spmp->iroot);
 		hammer2_chain_unlock(schain);
@@ -1027,6 +1027,19 @@ next_hmp:
 
 	/* Connect up mount pointers. */
 	hammer2_mount_helper(mp, pmp);
+
+	/* Update readonly hmp if !rdonly. */
+	pmp->rdonly = rdonly;
+	if (hmp->rdonly && !pmp->rdonly) {
+		error = hammer2_remount_impl(hmp);
+		if (error) {
+			hprintf("failed to update to rw\n");
+			hammer2_unmount_helper(mp, pmp, NULL);
+			hammer2_lk_unlock(&hammer2_mntlk);
+			hammer2_unmount(mp, MNT_FORCE);
+			return (error);
+		}
+	}
 	hammer2_lk_unlock(&hammer2_mntlk);
 
 	/* Initial statfs to prime mnt_stat. */
@@ -1182,7 +1195,7 @@ hammer2_unmount_helper(struct mount *mp, hammer2_pfs_t *pmp, hammer2_dev_t *hmp)
 	if (pmp) {
 		KKASSERT(hmp == NULL);
 		KKASSERT(MPTOPMP(mp) == pmp);
-		//pmp->mp = NULL; /* still uses pmp->mp->mnt_stat */
+		pmp->mp = NULL;
 		mp->mnt_data = NULL;
 		mp->mnt_flag &= ~MNT_LOCAL;
 
@@ -1570,10 +1583,29 @@ hammer2_fixup_pfses(hammer2_dev_t *hmp)
 }
 
 static int
-hammer2_do_recovery(hammer2_dev_t *hmp)
+hammer2_remount_impl(hammer2_dev_t *hmp)
 {
 	hammer2_volume_t *vol;
-	int i, error = 0;
+	int i, j, error;
+
+	for (i = 0; i < hmp->nvolumes; ++i) {
+		vol = &hmp->volumes[i];
+		error = hammer2_access_devvp(vol->dev->devvp, 0);
+		if (error)
+			return (error);
+	}
+
+	for (i = 0; i < hmp->nvolumes; ++i) {
+		vol = &hmp->volumes[i];
+		error = hammer2_getw_devvp(vol->dev->devvp);
+		if (error) {
+			for (j = 0; j < i; ++j) {
+				vol = &hmp->volumes[j];
+				hammer2_putw_devvp(vol->dev->devvp);
+			}
+			return (error);
+		}
+	}
 
 	for (i = 0; i < hmp->nvolumes; ++i) {
 		vol = &hmp->volumes[i];
@@ -1581,12 +1613,12 @@ hammer2_do_recovery(hammer2_dev_t *hmp)
 			error = hammer2_recovery(hmp);
 			if (error == 0)
 				error |= hammer2_fixup_pfses(hmp);
+			if (error)
+				return (hammer2_error_to_errno(error));
 		}
-		if (error)
-			return (hammer2_error_to_errno(error));
 	}
-	KKASSERT(i == hmp->nvolumes);
-	KKASSERT(error == 0);
+	hmp->rdonly = 0;
+	hmp->spmp->rdonly = 0; /* never used */
 
 	return (0);
 }
@@ -1595,58 +1627,32 @@ static int
 hammer2_remount(hammer2_dev_t *hmp, struct mount *mp)
 {
 	struct vfsoptlist *opts = mp->mnt_optnew;
-	hammer2_volume_t *vol;
-	int i, j, error = 0;
+	hammer2_pfs_t *pmp = MPTOPMP(mp);
+	int error;
 
-	if (!hmp->rdonly && vfs_flagopt(opts, "ro", NULL, 0)) {
-		hprintf("update to read-only mount unsupported\n");
-		error = EOPNOTSUPP;
-	} else if (hmp->rdonly && !vfs_flagopt(opts, "ro", NULL, 0)) {
-		for (i = 0; i < hmp->nvolumes; ++i) {
-			vol = &hmp->volumes[i];
-			error = hammer2_access_devvp(vol->dev->devvp, 0);
+	if (pmp->rdonly == 0 && vfs_flagopt(opts, "ro", NULL, 0)) {
+		/* XXX can't call hammer2_putw_devvp() unless last rw PFS */
+		vfs_flagopt(opts, "ro", &mp->mnt_flag, MNT_RDONLY);
+		pmp->rdonly = 1;
+	} else if (pmp->rdonly == 1 && !vfs_flagopt(opts, "ro", NULL, 0)) {
+		if (hmp->rdonly) {
+			error = hammer2_remount_impl(hmp);
 			if (error)
 				return (error);
 		}
-		KKASSERT(i == hmp->nvolumes);
-		KKASSERT(error == 0);
-
-		for (i = 0; i < hmp->nvolumes; ++i) {
-			vol = &hmp->volumes[i];
-			error = hammer2_getw_devvp(vol->dev->devvp);
-			if (error)
-				break;
-		}
-		if (error) {
-			for (j = 0; j < i; ++j) {
-				vol = &hmp->volumes[i];
-				(void)hammer2_putw_devvp(vol->dev->devvp);
-			}
-			return (error);
-		}
-		KKASSERT(i == hmp->nvolumes);
-		KKASSERT(error == 0);
-
-		error = hammer2_do_recovery(hmp);
-		if (error)
-			return (error);
-
-		hmp->rdonly = 0;
 		MNT_ILOCK(mp);
 		mp->mnt_flag &= ~MNT_RDONLY;
 		MNT_IUNLOCK(mp);
-	} else {
-		debug_hprintf("ro/rw unchanged\n");
-		error = hammer2_do_recovery(hmp);
-		if (error)
-			return (error);
+		pmp->rdonly = 0;
 	}
 
-	debug_hprintf("ro %d rw %d MNT_RDONLY %d rdonly %d error %d\n",
-	    vfs_flagopt(opts, "ro", NULL, 0),  vfs_flagopt(opts, "rw", NULL, 0),
-	    (mp->mnt_flag & MNT_RDONLY) ? 1 : 0, hmp->rdonly, error);
+	debug_hprintf("ro %d rw %d MNT_RDONLY %d rdonly %d/%d/%d\n",
+	    vfs_flagopt(opts, "ro", NULL, 0),
+	    vfs_flagopt(opts, "rw", NULL, 0),
+	    (mp->mnt_flag & MNT_RDONLY) ? 1 : 0,
+	    hmp->rdonly, hmp->spmp->rdonly, pmp->rdonly);
 
-	return (error);
+	return (0);
 }
 
 /*

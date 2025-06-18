@@ -1135,41 +1135,14 @@ hammer2_extend_file(hammer2_inode_t *ip, hammer2_key_t nsize, int writing)
 		cluster_init_vn(&ip->clusterw);
 }
 
-/*
- * While bmap implementation itself works, HAMMER2 needs to force VFS to invoke
- * logical vnode strategy (rather than device vnode strategy) unless compression
- * type is set to none.
- */
-static int use_nop_bmap = 1;
-
-static __inline int
-hammer2_nop_bmap(struct vop_bmap_args *ap)
-{
-	if (ap->a_bop != NULL)
-		*ap->a_bop = &ap->a_vp->v_bufobj;
-	if (ap->a_bnp != NULL)
-		*ap->a_bnp = ap->a_bn;
-	if (ap->a_runp != NULL)
-		*ap->a_runp = 0; /* XXX2 */
-	if (ap->a_runb != NULL)
-		*ap->a_runb = 0;
-
-	return (0);
-}
-
 static int
-hammer2_bmap(struct vop_bmap_args *ap)
+hammer2_bmap_impl(struct vop_bmap_args *ap)
 {
 	hammer2_xop_bmap_t *xop;
-	hammer2_dev_t *hmp;
 	hammer2_inode_t *ip = VTOI(ap->a_vp);
-	hammer2_volume_t *vol;
+	hammer2_dev_t *hmp = ip->pmp->pfs_hmps[0];
 	int error;
 
-	if (use_nop_bmap)
-		return (hammer2_nop_bmap(ap));
-
-	hmp = ip->pmp->pfs_hmps[0];
 	if (ap->a_bop != NULL)
 		*ap->a_bop = &hmp->devvp->v_bufobj;
 	if (ap->a_bnp == NULL)
@@ -1179,38 +1152,50 @@ hammer2_bmap(struct vop_bmap_args *ap)
 	if (ap->a_runb != NULL)
 		*ap->a_runb = 0; /* unsupported */
 
-	/* Initialize with error or nonexistent case first. */
-	if (ap->a_bnp != NULL)
-		*ap->a_bnp = -1;
-
 	xop = hammer2_xop_alloc(ip, 0);
-	xop->lbn = ap->a_bn; /* logical block number */
+	xop->lbn = ap->a_bn;
 	hammer2_xop_start(&xop->head, &hammer2_bmap_desc);
 	error = hammer2_xop_collect(&xop->head, 0);
 	error = hammer2_error_to_errno(error);
 	if (error) {
-		/* No physical block assigned. */
 		if (error == ENOENT)
-			error = 0;
-		goto done;
+			error = 0; /* sparse */
+		*ap->a_bnp = -1;
+	} else {
+		KKASSERT(xop->offset != HAMMER2_OFF_MASK);
+		*ap->a_bnp = xop->offset / DEV_BSIZE; /* XXX radix bits */
 	}
-
-	if (xop->offset != HAMMER2_OFF_MASK) {
-		/* Get volume from the result offset. */
-		KKASSERT((xop->offset & HAMMER2_OFF_MASK_RADIX) == 0);
-		vol = hammer2_get_volume(hmp, xop->offset);
-		KKASSERT(vol);
-		KKASSERT(vol->dev);
-		KKASSERT(vol->dev->devvp);
-
-		/* Return physical block number within devvp. */
-		if (ap->a_bnp != NULL)
-			*ap->a_bnp = (xop->offset - vol->offset) / DEV_BSIZE;
-	}
-done:
 	hammer2_xop_retire(&xop->head, HAMMER2_XOPMASK_VOP);
 
 	return (error);
+}
+
+/*
+ * HAMMER2 needs to force VFS to invoke logical vnode strategy
+ * (not device vnode strategy).
+ */
+static int
+hammer2_bmap(struct vop_bmap_args *ap)
+{
+	hammer2_inode_t *ip = VTOI(ap->a_vp);
+
+	/*
+	 * XXX struct vop_bmap_args in FreeBSD doesn't have ap->a_cmd to
+	 * distinct VOP_BMAP for seek from others.
+	 */
+	if (ip->in_seek)
+		return (hammer2_bmap_impl(ap));
+
+	if (ap->a_bop != NULL)
+		*ap->a_bop = &ap->a_vp->v_bufobj;
+	if (ap->a_bnp != NULL)
+		*ap->a_bnp = ap->a_bn;
+	if (ap->a_runp != NULL)
+		*ap->a_runp = 0;
+	if (ap->a_runb != NULL)
+		*ap->a_runb = 0;
+
+	return (0);
 }
 
 static int
@@ -2116,7 +2101,6 @@ static int
 hammer2_ioctl(struct vop_ioctl_args *ap)
 {
 	struct vnode *vp = ap->a_vp;
-	hammer2_inode_t *ip = VTOI(vp);
 	int error;
 
 	/*
@@ -2125,7 +2109,7 @@ hammer2_ioctl(struct vop_ioctl_args *ap)
 	 */
 	error = 0; /* vn_lock(vp, LK_EXCLUSIVE); */
 	if (error == 0) {
-		error = hammer2_ioctl_impl(ip, ap->a_command, ap->a_data,
+		error = hammer2_ioctl_impl(vp, ap->a_command, ap->a_data,
 		    ap->a_fflag, ap->a_cred);
 		/* VOP_UNLOCK(vp); */
 	} else {

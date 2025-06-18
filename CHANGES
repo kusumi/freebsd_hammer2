@@ -1,3 +1,12 @@
+v1.2.10
+=======
+- Sync with DragonFly
+- Support FIOSEEKDATA / FIOSEEKHOLE
+- Support rw -> ro update
+- Import lib/libutil/mntopts.[ch] from FreeBSD
+ (FreeBSD cda23fc36d22bfa9d57d1a57c0daaeeb86bac94f broke build on 15.0-CURRENT)
+- Minor fixes
+
 v1.2.9
 ======
 - Sync with DragonFly

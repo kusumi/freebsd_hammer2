@@ -39,6 +39,8 @@
 #include "hammer2_ioctl.h"
 #include "hammer2_mount.h"
 
+#include <sys/filio.h>
+
 #include <geom/geom.h>
 
 /*
@@ -1070,9 +1072,10 @@ hammer2_ioctl_volume_list2(hammer2_inode_t *ip, void *data)
 }
 
 int
-hammer2_ioctl_impl(hammer2_inode_t *ip, unsigned long com, void *data,
-    int fflag, struct ucred *cred)
+hammer2_ioctl_impl(struct vnode *vp, unsigned long com, void *data, int fflag,
+    struct ucred *cred)
 {
+	hammer2_inode_t *ip = VTOI(vp);
 	int error;
 
 	switch (com) {
@@ -1121,10 +1124,20 @@ hammer2_ioctl_impl(hammer2_inode_t *ip, unsigned long com, void *data,
 	case HAMMER2IOC_VOLUME_LIST2:
 		error = hammer2_ioctl_volume_list2(ip, data);
 		break;
+	case FIOSEEKDATA:
+	case FIOSEEKHOLE:
+		KKASSERT(ip->in_seek == 0);
+		ip->in_seek = 1;
+		error = vn_bmap_seekhole(vp, com, (off_t *)data, cred);
+		KKASSERT(ip->in_seek == 1);
+		ip->in_seek = 0;
+		break;
 	default:
 		error = EOPNOTSUPP;
 		break;
 	}
+
+	KKASSERT(ip->in_seek == 0);
 
 	return (error);
 }
