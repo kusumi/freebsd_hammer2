@@ -1847,7 +1847,7 @@ restart:
 		 * not NULL that will also be exclusively locked.  Do the
 		 * meat of the flush.
 		 */
-		if (vp) {
+		if (vp && (vp->v_type != VCHR || vp->v_rdev)) {
 			error = vn_fsync_buf(vp, MNT_WAIT); /* vop_stdfsync() */
 			if (error) {
 				hprintf("inum %016llx vnode flush failed %d\n",

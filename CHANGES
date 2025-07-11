@@ -1,3 +1,10 @@
+v1.2.11
+=======
+- Sync with DragonFly
+- Support btime
+- Support link count for directory inode
+- Misc fixes / updates
+
 v1.2.10
 =======
 - Sync with DragonFly
