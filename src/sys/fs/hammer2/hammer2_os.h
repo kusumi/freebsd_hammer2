@@ -63,6 +63,9 @@
 /* See FreeBSD src b214fcceacad6b842545150664bd2695c1c2b34f */
 #define FREEBSD_READDIR_COOKIES_64 1400045
 
+/* See FreeBSD src 829f0bcb5fe24bb523c5a9e7bd3bb79412e06906 */
+#define FREEBSD_VNODE_STATE 1400077
+
 #define print_backtrace()	kdb_backtrace()
 
 #ifdef HAMMER2_INVARIANTS
