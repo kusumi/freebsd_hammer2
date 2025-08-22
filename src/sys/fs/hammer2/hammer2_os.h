@@ -114,6 +114,13 @@ hammer2_lk_destroy(hammer2_lk_t *p)
 	sx_destroy(p);
 }
 
+#ifdef INVARIANTS
+static __inline void
+hammer2_lk_assert(hammer2_lk_t *p, int what)
+{
+	sx_assert(p, what);
+}
+
 static __inline void
 hammer2_lk_assert_ex(hammer2_lk_t *p)
 {
@@ -125,6 +132,11 @@ hammer2_lk_assert_unlocked(hammer2_lk_t *p)
 {
 	sx_assert(p, SA_UNLOCKED);
 }
+#else
+#define hammer2_lk_assert(p, what)	do {} while (0)
+#define hammer2_lk_assert_ex(p)		do {} while (0)
+#define hammer2_lk_assert_unlocked(p)	do {} while (0)
+#endif
 
 typedef int hammer2_lkc_t;
 
@@ -138,10 +150,10 @@ hammer2_lkc_destroy(hammer2_lkc_t *c __unused)
 {
 }
 
-static __inline void
-hammer2_lkc_sleep(hammer2_lkc_t *c, hammer2_lk_t *p, const char *s)
+static __inline int
+hammer2_lkc_sleep(hammer2_lkc_t *c, hammer2_lk_t *p, const char *s, int timo)
 {
-	sx_sleep(c, p, 0, s, 0);
+	return (sx_sleep(c, p, 0, s, timo));
 }
 
 static __inline void
@@ -208,10 +220,10 @@ hammer2_mtx_destroy(hammer2_mtx_t *p)
 	sx_destroy(&p->lock);
 }
 
-static __inline void
-hammer2_mtx_sleep(hammer2_lkc_t *c, hammer2_mtx_t *p, const char *s)
+static __inline int
+hammer2_mtx_sleep(hammer2_lkc_t *c, hammer2_mtx_t *p, const char *s, int timo)
 {
-	sx_sleep(c, &p->lock, 0, s, 0);
+	return (sx_sleep(c, &p->lock, 0, s, timo));
 }
 
 static __inline void
@@ -225,6 +237,13 @@ static __inline int
 hammer2_mtx_owned(hammer2_mtx_t *p)
 {
 	return (sx_xlocked(&p->lock));
+}
+
+#ifdef INVARIANTS
+static __inline void
+hammer2_mtx_assert(hammer2_mtx_t *p, int what)
+{
+	sx_assert(&p->lock, what);
 }
 
 static __inline void
@@ -250,6 +269,13 @@ hammer2_mtx_assert_unlocked(hammer2_mtx_t *p)
 {
 	sx_assert(&p->lock, SA_UNLOCKED);
 }
+#else
+#define hammer2_mtx_assert(p, what)	do {} while (0)
+#define hammer2_mtx_assert_ex(p)	do {} while (0)
+#define hammer2_mtx_assert_sh(p)	do {} while (0)
+#define hammer2_mtx_assert_locked(p)	do {} while (0)
+#define hammer2_mtx_assert_unlocked(p)	do {} while (0)
+#endif
 
 static __inline int
 hammer2_mtx_ex_try(hammer2_mtx_t *p)
@@ -344,6 +370,13 @@ hammer2_spin_destroy(hammer2_spin_t *p)
 	sx_destroy(p);
 }
 
+#ifdef INVARIANTS
+static __inline void
+hammer2_spin_assert(hammer2_spin_t *p, int what)
+{
+	sx_assert(p, what);
+}
+
 static __inline void
 hammer2_spin_assert_ex(hammer2_spin_t *p)
 {
@@ -367,6 +400,13 @@ hammer2_spin_assert_unlocked(hammer2_spin_t *p)
 {
 	sx_assert(p, SA_UNLOCKED);
 }
+#else
+#define hammer2_spin_assert(p, what)	do {} while (0)
+#define hammer2_spin_assert_ex(p)	do {} while (0)
+#define hammer2_spin_assert_sh(p)	do {} while (0)
+#define hammer2_spin_assert_locked(p)	do {} while (0)
+#define hammer2_spin_assert_unlocked(p)	do {} while (0)
+#endif
 
 MALLOC_DECLARE(M_HAMMER2);
 MALLOC_DECLARE(M_HAMMER2_LZ4);

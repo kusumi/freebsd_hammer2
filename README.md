@@ -3,7 +3,7 @@ FreeBSD [HAMMER2](https://gitweb.dragonflybsd.org/dragonfly.git/blob/HEAD:/sys/v
 
 ## Requirements
 
-+ FreeBSD 13.x / 14.x
++ FreeBSD 14.x
 
 + src tree under /usr/src
 
@@ -21,7 +21,3 @@ FreeBSD [HAMMER2](https://gitweb.dragonflybsd.org/dragonfly.git/blob/HEAD:/sys/v
 
         $ cd freebsd_hammer2
         $ make uninstall
-
-## Bugs
-
-+ VOP\_READDIR implementation is known to not work with some user space libraries on 32 bit platforms.
